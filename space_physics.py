@@ -1,4 +1,4 @@
-"definición analítica de las ecuaciones del problema, "
+"Definición analítica de las ecuaciones del problema, "
 "cómputo de la matriz Jacobiana exacta,"
 "verificación de los invariantes 2T y L2."
 
