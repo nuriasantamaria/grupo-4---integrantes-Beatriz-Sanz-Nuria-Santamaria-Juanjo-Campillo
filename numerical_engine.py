@@ -4,10 +4,27 @@
 "para evaluar la conservación física de las integrales primeras"
 
 "Milestone 1 : Prototypes to integrate orbits without functions."
+"1. Write a script to integrate orbits with an Euler method"
+
+from numpy import array, zeros
+import matplotlib.pyplot as plt
+N=100000
+Nv=2
+delta=0.01
+u=zeros((N+1,Nv))
+u[0,:]=array((1,0))
+def f(u):
+    return array((u[1], -u[0]))
+for n in range(0,N):
+    u[n+1,:]=u[n,:]+delta*f(u[n,:])
+plt.plot(u[:,0],u[:,1])
+plt.show()
+
+
+
+"Milestone 1 : Prototypes to integrate orbits without functions."
 "1.2 Write a script to integrate orbits with a Crank-Nicolson method."
 
-import matplotlib.pyplot as plt 
-from numpy import array, zeros
 def F(u):
     return array([u[1], -u[0]])
 N=1000000
