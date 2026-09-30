@@ -25,9 +25,9 @@ u = np.zeros((N+1, Nv))
 u[0,:]=np.array([0.01,Omega_mod0,0.01]) # Por ejemplo, puede ir en los términos 2 o 3 en su lugar.
 
 def f(u):
-    f1 = ((I2 - I3) / I1) * U[1] * U[2]
-    f2 = ((I3 - I1) / I2) * U[2] * U[0]
-    f3 = ((I1 - I2) / I3) * U[0] * U[1]
+    f1 = ((I2 - I3) / I1) * u[1] * u[2]
+    f2 = ((I3 - I1) / I2) * u[2] * u[0]
+    f3 = ((I1 - I2) / I3) * u[0] * u[1]
     return np.array([f1, f2, f3])
 
 def euler(u,delta):
