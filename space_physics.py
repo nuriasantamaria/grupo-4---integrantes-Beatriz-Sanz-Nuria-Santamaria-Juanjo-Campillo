@@ -23,7 +23,7 @@ import numpy as np
 
 def euler_equations(omega, I):
     return np.array([
-        (I[0,0] - I[2,2]) / I[0,0] * omega[1] * omega[2],
+        (I[1,1] - I[2,2]) / I[0,0] * omega[1] * omega[2],
         (I[2,2] - I[0,0]) / I[1,1] * omega[2] * omega[0],
         (I[0,0] - I[1,1]) / I[2,2] * omega[0] * omega[1],
     ])
