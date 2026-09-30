@@ -1,0 +1,5 @@
+"Write a function called Euler to integrate one step. The function F (U, t)"
+"of the Cauchy problem should be input argument."
+
+def euler(U, t, delta, F):
+    return U + delta * F(U, t)
