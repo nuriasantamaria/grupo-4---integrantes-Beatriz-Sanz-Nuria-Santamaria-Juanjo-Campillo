@@ -13,14 +13,22 @@ from matplotlib.pylab import norm
 
 #Parametros de integración
 N=100000
-Nv=2
+Nv=3
 delta=0.01
 
-u=np.zeros((N+1,Nv))
-u[0,:]=np.array((1,0))
+Omega_mod0 = 1 # Valor inicial del módulo de Omega, en rad/s.
+I1 = 1 #temporal
+I2 = 2 #temporal
+I3 = 3 #temporal 
+
+u = np.zeros((N+1, Nv))
+u[0,:]=np.array([0.01,Omega_mod0,0.01]) # Por ejemplo, puede ir en los términos 2 o 3 en su lugar.
 
 def f(u):
-    return np.array((u[1], -u[0]))
+    f1 = ((I2 - I3) / I1) * U[1] * U[2]
+    f2 = ((I3 - I1) / I2) * U[2] * U[0]
+    f3 = ((I1 - I2) / I3) * U[0] * U[1]
+    return np.array([f1, f2, f3])
 
 def euler(u,delta):
     for n in range(0,N):
