@@ -20,7 +20,7 @@ for n in range(0,N):
 plt.plot(u[:,0],u[:,1])
 plt.show()
 
-a=array[0,1]
+
 
 "Milestone 1 : Prototypes to integrate orbits without functions."
 "1.2 Write a script to integrate orbits with a Crank-Nicolson method."
