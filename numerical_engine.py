@@ -30,10 +30,13 @@ def f(u):
     f3 = ((I1 - I2) / I3) * u[0] * u[1]
     return np.array([f1, f2, f3])
 
-def euler(u,delta):
-    for n in range(0,N):
-        u[n+1,:]=u[n,:]+delta*f(u[n,:])
-    return u 
+def euler(f, u0, delta, N):
+    u0 = np.asarray(u0, dtype=float)
+    u = np.zeros((N+1, u0.size))
+    u[0, :] = u0
+    for n in range(N):
+        u[n+1, :] = u[n, :] + delta * f(u[n, :])
+    return u
 
 def crank_nicolson(u,delta):
     for n in range(0,N):
