@@ -1,5 +1,8 @@
 import numpy as np
 import matplotlib.pyplot as plt
+from functools import partial
+from space_physics import euler_equations
+from numerical_engine import runge_kutta_4
 
 def ellipsoid_grid(a, b, c, n_points=60):
     theta = np.linspace(0, 2 * np.pi, n_points)
@@ -50,6 +53,13 @@ def polhode_points(I, w0, n_points=400):
 
     return curves
 
+def integrate_trayectory(I, w0, T=50.0, N=10000):
+    f = partial(euler_equations, I=np.diag(I))
+    delta = T/N
+    traj = runge_kutta_4(f, w0, delta, N)
+    t = np.linspace(0, T, N+1)
+    return t, traj
+
 def poinsot_drawing(ax, I, w0):
     ax.cla()
 
@@ -57,6 +67,9 @@ def poinsot_drawing(ax, I, w0):
 
     X_E, Y_E, Z_E = ellipsoid_grid(*semiaxes_E)
     X_L, Y_L, Z_L = ellipsoid_grid(*semiaxes_L)
+
+    t, traj = integrate_trayectory(I, w0)
+    ax.plot(traj[:,0], traj[:,1], traj[:,2], color="tab:red", lw=2)
 
     ax.plot_surface(X_E, Y_E, Z_E, alpha=0.3, shade=False, color="tab:green")
     ax.plot_surface(X_L, Y_L, Z_L, alpha=0.3, shade=False, color="tab:pink")
@@ -70,28 +83,43 @@ def poinsot_drawing(ax, I, w0):
     ax.set_xlabel("omega1") ; ax.set_ylabel("omega2") ; ax.set_zlabel("omega3")
 
 
-
 if __name__ == "__main__":
+
+    I = (1.0, 2.0, 3.0)
+    w0 = np.array([0.1, 1.0, 0.1])
+
+    t, traj = integrate_trayectory(I, w0)
+
+    # Geometría y trayectoria.
     fig = plt.figure()
     ax = fig.add_subplot(projection="3d")
-    poinsot_drawing(ax, (1.0, 2.0, 3.0), np.array([0.1, 0.1, 1.0]))
-    plt.show()
+    poinsot_drawing(ax, I, w0)
+    ax.plot(traj[:,0], traj[:,1], traj[:,2], color="tab:red", lw=2)
 
+    # Vector omega(t)
+    fig2, ax2 = plt.subplots()
+    ax2.plot(t, traj[:,0], label="omega1")
+    ax2.plot(t, traj[:,1], label="omega2")
+    ax2.plot(t, traj[:,2], label="omega3")
+    ax2.set_xlabel("t"); ax2.legend(); ax2.grid(True)
+
+    plt.show()
+    
     #I = (1.0, 2.0, 3.0)
     #w0 = np.array([0.1, 1.0, 0.1])
     #(a_E, b_E, c_E), (a_L, b_L, c_L) = poinsot_semiaxes(I, w0)
     #print("Energía :", a_E, b_E, c_E)
     #print("Momento :", a_L, b_L, c_L)
 
-    I = (1.0, 2.0, 3.0)
-    w0 = np.array([0.1, 1.0, 0.1])
-    I1, I2, I3 = I
-    twoT = I1*w0[0]**2 + I2*w0[1]**2 + I3*w0[2]**2
-    L2 = (I1*w0[0])**2 + (I2*w0[1])**2 + (I3*w0[2])**2
+    #I1, I2, I3 = I
+    #twoT = I1*w0[0]**2 + I2*w0[1]**2 + I3*w0[2]**2
+    #L2 = (I1*w0[0])**2 + (I2*w0[1])**2 + (I3*w0[2])**2
 
-    for w1, w2, w3 in polhode_points(I, w0):
-        print(np.max(np.abs(I1*w1**2 + I2*w2**2 + I3*w3**2 - twoT)),
-            np.max(np.abs((I1*w1)**2 + (I2*w2)**2 + (I3*w3)**2 - L2)))
+    #for w1, w2, w3 in polhode_points(I, w0):
+    #    print(np.max(np.abs(I1*w1**2 + I2*w2**2 + I3*w3**2 - twoT)),
+    #np.max(np.abs((I1*w1)**2 + (I2*w2)**2 + (I3*w3)**2 - L2)))
+
+    
     
 
 
