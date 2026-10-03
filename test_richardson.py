@@ -1,5 +1,5 @@
 import numpy as np
-from numerical_engine import runge_kutta_4, integration_final_state, richardson_error, scheme_order, f
+from numerical_engine import runge_kutta_4, integration_final_state, richardson_error, scheme_order
 from numerical_engine import richardson_extrapolation
 from functools import partial
 from space_physics import euler_equations
