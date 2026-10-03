@@ -38,14 +38,21 @@ def euler(f, u0, delta, N):
         u[n+1, :] = u[n, :] + delta * f(u[n, :])
     return u
 
-def crank_nicolson(u,delta):
-    for n in range(0,N):
-        Y=u[n,:]
-        while norm(Y-u[n,:]-delta/2*(f(u[n,:])+f(Y)))>1e-6:
-            R=Y-u[n,:]-delta/2*(f(u[n,:])+f(Y))
-            Y=Y-R
-            print(norm(R))
-            u[n+1,:]=Y
+def crank_nicolson(f, u0, delta, N, tol=1e-6, max_iter=100):
+    # Misma firma que euler y runge_kutta_4. En cada paso se resuelve
+    # Y = u_n + delta/2 (f(u_n) + f(Y)) por iteración de punto fijo (Y <- Y - R).
+    u0 = np.asarray(u0, dtype=float)
+    u = np.zeros((N+1, u0.size))
+    u[0, :] = u0
+    for n in range(0, N):
+        fn = f(u[n, :])
+        Y = u[n, :].copy()
+        for _ in range(max_iter):
+            R = Y - u[n, :] - delta/2*(fn + f(Y))
+            Y = Y - R
+            if not norm(R) > tol:   # 'not >' para salir también si aparece NaN
+                break
+        u[n+1, :] = Y
     return u
 
 def runge_kutta_4(f, u0, delta, N):

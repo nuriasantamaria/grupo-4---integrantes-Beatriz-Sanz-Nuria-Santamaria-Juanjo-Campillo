@@ -35,8 +35,10 @@ def jacobian_matrix(omega, I):
         [((I[0,0] - I[1,1]) / I[2,2])* omega[1], ((I[0,0] - I[1,1]) / I[2,2]) * omega[0], 0],
     ])
 
-def kinetic_energy(omega, I):        
-    return 0.5 * np.dot(omega, np.array(I) * omega)
+# omega puede ser un vector (3,) o un historial (n, 3): con axis=-1 se obtiene
+# un valor por instante de tiempo.
+def kinetic_energy(omega, I):
+    return 0.5 * np.sum(np.array(I) * np.asarray(omega)**2, axis=-1)
 
-def angular_momentum_sq(omega, I):  
-    return np.sum((np.array(I) * omega) ** 2)
+def angular_momentum_sq(omega, I):
+    return np.sum((np.array(I) * np.asarray(omega)) ** 2, axis=-1)
