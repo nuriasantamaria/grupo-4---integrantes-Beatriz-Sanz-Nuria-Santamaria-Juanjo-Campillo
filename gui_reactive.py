@@ -1,39 +1,3 @@
-"""
-gui_reactive.py — Janibekov Lab
-===============================
-
-Dashboard interactivo multipanel para la dinámica de rotación libre de un sólido
-rígido (satélite) descrita por las ecuaciones de Euler:
-
-    I1 dω1/dt = (I2 - I3) ω2 ω3
-    I2 dω2/dt = (I3 - I1) ω3 ω1
-    I3 dω3/dt = (I1 - I2) ω1 ω2
-
-junto con la cinemática de la orientación en cuaterniones, q' = ½ q ⊗ (0, ω).
-
-Muestra el efecto Janibekov (teorema del eje intermedio): la rotación en torno
-al eje de momento de inercia intermedio es inestable y el cuerpo "voltea"
-periódicamente.
-
-Estructura del archivo
-----------------------
-1. Física y geometría       – ecuaciones, invariantes, superficies de Poinsot,
-                               separatriz y familia de polodias analíticas.
-2. Integradores numéricos    – SOLO los esquemas de numerical_engine.py: Euler,
-                               Crank-Nicolson y RK4, y la extrapolación de
-                               Richardson para estimar orden y error.
-3. Modelo de simulación      – SimConfig / Simulation (historial incremental)
-                               y previsualización estática.
-4. Widgets de interfaz       – FloatSlider, SimConfigPanel, tarjetas.
-5. Ventana principal         – paneles 3D (OpenGL), gráficas de deriva,
-                               multisimulación, animación y presets.
-
-Dependencias:  pip install PySide6 pyqtgraph PyOpenGL numpy sympy
-               + numerical_engine.py y space_physics.py en la misma carpeta
-Ejecución:     python gui_reactive.py
-
-Atajos: [Espacio] iniciar/pausar · [R] reiniciar · [P] previsualizar
-"""
 
 import math
 import sys
@@ -51,7 +15,7 @@ from space_physics import euler_equations, kinetic_energy, angular_momentum_sq
 
 
 # =============================================================================
-# 1. FÍSICA Y GEOMETRÍA
+# 1. GEOMETRÍA
 # =============================================================================
 
 # Las ecuaciones de Euler y los invariantes T y L² vienen de space_physics.py
