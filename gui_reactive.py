@@ -11,7 +11,8 @@ import pyqtgraph as pg
 import pyqtgraph.opengl as gl
 
 import numerical_engine as ne
-from space_physics import euler_equations, kinetic_energy, angular_momentum_sq
+from space_physics import (euler_equations, kinetic_energy, angular_momentum_sq,
+                           equilibrium_analysis)
 
 
 # =============================================================================
@@ -171,23 +172,33 @@ def make_rhs(I):
 
 
 M_EULER = "Euler explícito"
+M_BE = "Euler implícito (inverso)"
 M_CN = "Crank-Nicolson (implícito)"
 M_RK4 = "Runge-Kutta 4"
 
-# Tolerancia del punto fijo de Crank-Nicolson: más estricta que la de 1e-6 por
+# Tolerancia del punto fijo de los esquemas implícitos (Euler inverso y Crank-Nicolson): más estricta que la de 1e-6 por
 # defecto, para que el error del solver no tape la deriva propia del esquema.
 CN_TOL = 1e-12
 
 SCHEMES = {
     M_EULER: ne.euler,
+    M_BE: partial(ne.implicit_euler, tol=CN_TOL),
     M_CN: partial(ne.crank_nicolson, tol=CN_TOL),
     M_RK4: ne.runge_kutta_4,
 }
 
 # Orden nominal p de cada esquema (para el error de Richardson)
-ORDERS = {M_EULER: 1, M_CN: 2, M_RK4: 4}
+ORDERS = {M_EULER: 1, M_BE: 1, M_CN: 2, M_RK4: 4}
 
-METHOD_SHORT = {M_EULER: "Euler", M_CN: "C-N", M_RK4: "RK4"}
+# Función de amplificación R(z) de cada esquema (estabilidad lineal, |R(z)| ≤ 1)
+AMPLIFICATION = {
+    M_EULER: ne.amplification_euler,
+    M_BE: ne.amplification_implicit_euler,
+    M_CN: ne.amplification_crank_nicolson,
+    M_RK4: ne.amplification_runge_kutta_4,
+}
+
+METHOD_SHORT = {M_EULER: "Euler", M_BE: "Euler imp.", M_CN: "C-N", M_RK4: "RK4"}
 
 DIVERGENCE_LIMIT = 1e6
 
@@ -196,7 +207,7 @@ def integrate(method, y0, dt, I, n):
     """Integra n pasos con el esquema del motor. Devuelve un array (n+1, 7); si
     el método diverge, las filas a partir de la divergencia se rellenan con NaN."""
     with np.errstate(all="ignore"):          # Euler puede desbordar a inf/NaN
-        out = SCHEMES[method](make_rhs(I), np.asarray(y0, dtype=float), dt, n)
+        out = ne.integrate(SCHEMES[method], make_rhs(I), np.asarray(y0, dtype=float), dt, n)
         bad = ~(np.abs(out[:, :3]).sum(axis=1) < DIVERGENCE_LIMIT)   # también atrapa NaN
     if bad.any():
         out[np.argmax(bad):] = np.nan
@@ -216,6 +227,39 @@ def richardson_analysis(cfg, T):
         err = ne.richardson_error(scheme, f, u0, T, n, p)
         u_extr = ne.richardson_extrapolation(scheme, f, u0, T, n, p)
     return {"n": n, "p": p, "p_est": float(p_est), "err": float(err), "u_extr": u_extr}
+
+
+def surrounded_axis(I, w0):
+    """Eje principal (equilibrio) alrededor del que precesa la órbita, o None si
+    está sobre la separatriz o el trompo es simétrico."""
+    if is_degenerate(I):
+        return None
+    I = np.asarray(I, dtype=float)
+    a, b, c = sorted_axes(I)
+    twoT = 2 * kinetic_energy(w0, I)
+    D = angular_momentum_sq(w0, I) - twoT * I[b]
+    if abs(D) < 1e-3 * twoT * I[b]:
+        return None
+    return c if D > 0 else a
+
+
+def equilibrium_diagnosis(cfg):
+    """Equilibrios ω = ±Ω e_k sobre el nivel de energía de la órbita, su tipo según
+    los autovalores del Jacobiano y, para el centro que rodea la órbita, el factor
+    |R(iβΔt)| del esquema: > 1 el mapa discreto lo convierte en foco inestable,
+    < 1 en foco estable (disipación numérica), = 1 conserva el centro."""
+    I, w0 = np.asarray(cfg.I, dtype=float), np.asarray(cfg.w0, dtype=float)
+    twoT = 2 * float(kinetic_energy(w0, I))
+    eqs = equilibrium_analysis(I, twoT)
+    axis = surrounded_axis(I, w0)
+    amp = None
+    if axis is not None and eqs[axis]["type"] == "centro":
+        beta = float(np.max(np.abs(eqs[axis]["eigvals"].imag)))
+        amp = abs(AMPLIFICATION[cfg.method](1j * beta * cfg.dt))
+    return {"eqs": eqs, "axis": axis, "amp": amp}
+
+
+STABILITY_COLORS = {"estable": "#66BB6A", "marginal": "#4FC3F7", "inestable": "#ef5350"}
 
 
 # =============================================================================
@@ -699,8 +743,12 @@ PRESETS = {
         dict(enabled=True, method=M_EULER, dt=0.08, **_JANI),
         dict(enabled=True, method=M_CN, dt=0.08, **_JANI),
         dict(enabled=True, method=M_RK4, dt=0.08, **_JANI)],
+    "Euler explícito vs implícito vs C-N (Δt grande)": [
+        dict(enabled=True, method=M_EULER, dt=0.08, I=(1.0, 2.0, 3.0), w0=(2.0, 0.3, 0.3)),
+        dict(enabled=True, method=M_BE, dt=0.08, I=(1.0, 2.0, 3.0), w0=(2.0, 0.3, 0.3)),
+        dict(enabled=True, method=M_CN, dt=0.08, I=(1.0, 2.0, 3.0), w0=(2.0, 0.3, 0.3))],
 }
-DEFAULT_PRESET = "Comparar integradores (mismo Δt)"
+DEFAULT_PRESET ="Comparar integradores (mismo Δt)"
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -922,6 +970,15 @@ class MainWindow(QtWidgets.QMainWindow):
         g.addWidget(self.rich_label, 2, 0, 1, 2)
         lay.addWidget(box)
 
+        # --- Equilibrios -----------------------------------------------------------
+        box = QtWidgets.QGroupBox("Puntos de equilibrio (autovalores del Jacobiano)")
+        v = QtWidgets.QVBoxLayout(box)
+        self.eq_label = QtWidgets.QLabel()
+        self.eq_label.setTextFormat(QtCore.Qt.TextFormat.RichText)
+        self.eq_label.setWordWrap(True)
+        v.addWidget(self.eq_label)
+        lay.addWidget(box)
+
         # --- Estado --------------------------------------------------------------
         box = QtWidgets.QGroupBox("Estado y conservación")
         v = QtWidgets.QVBoxLayout(box)
@@ -959,6 +1016,11 @@ class MainWindow(QtWidgets.QMainWindow):
                                     shader="balloon", glOptions="additive")
         v.addItem(self.mesh_E)
         v.addItem(self.mesh_L)
+
+        # Puntos de equilibrio ±Ω e_k, coloreados según su estabilidad
+        self.eq_points = gl.GLScatterPlotItem(pos=np.zeros((1, 3)), size=14, pxMode=True)
+        self.eq_points.setGLOptions("translucent")
+        v.addItem(self.eq_points)
 
         # Trayectorias por simulación: previsualización, estela viva y cabeza
         self.prev_lines, self.trail_lines, self.heads = [], [], []
@@ -1039,6 +1101,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.clock = 0.0
         self.previews = {}
         self._update_static_phase()
+        self._update_equilibria()
         self._rebuild_satellites()
         self.plot_w.setTitle(None)
         if self.chk_reactive.isChecked():
@@ -1129,6 +1192,7 @@ class MainWindow(QtWidgets.QMainWindow):
     # ------------------------------------------------ geometría estática ---
     def _on_ref_changed(self):
         self._update_static_phase()
+        self._update_equilibria()
         self._update_preview_items()
         self._refresh_views()
 
@@ -1168,6 +1232,47 @@ class MainWindow(QtWidgets.QMainWindow):
             f"ref. {cfg.name}:  2T = {twoT:.4g}   ‖L‖ = {np.sqrt(angular_momentum_sq(w0, I)):.4g}   ·   "
             f"{regime(I, w0)}")
         self._update_static_visibility()
+
+    def _update_equilibria(self):
+        """Tipo de cada equilibrio (simulación de referencia) y su efecto en cada esquema."""
+        cfgs = self.configs()
+        ref = equilibrium_diagnosis(cfgs[self.ref_index()])
+        pos, cols = [], []
+        rows = [f"<span style='color:{MUTED}'>ref. {cfgs[self.ref_index()].name} · "
+                f"rotación pura ω = ±Ω e_k con I_k Ω² = 2T</span>"]
+        for k, e in enumerate(ref["eqs"]):
+            col = STABILITY_COLORS[e["stability"]]
+            Om = e["omega"][k]
+            lam = ", ".join(f"{z.real:+.3f}{z.imag:+.3f}i" for z in e["eigvals"])
+            rows.append(f"<b>ω{'₁₂₃'[k]}</b> (Ω = ±{Om:.3f}): "
+                        f"<span style='color:{col}; font-weight:700'>{e['type']}</span> "
+                        f"({e['stability']})<br>"
+                        f"<span style='font-family:Consolas,monospace'>λ = {lam}</span>")
+            pos += [e["omega"], -e["omega"]]
+            cols += [rgba(col, 1.0)] * 2
+        self.eq_points.setData(pos=np.array(pos), color=np.array(cols))
+
+        rows.append(f"<br><span style='color:{MUTED}'>Centro rodeado por cada órbita y "
+                    f"factor de amplificación |R(iβΔt)| del esquema:</span>")
+        for c in cfgs:
+            if not c.enabled:
+                continue
+            d = equilibrium_diagnosis(c)
+            head = (f"<span style='color:{c.color}; font-weight:700'>● {c.name}</span> "
+                    f"<b>{METHOD_SHORT[c.method]}</b> · Δt={c.dt:g}: ")
+            if d["amp"] is None:
+                rows.append(head + "órbita sobre la separatriz o trompo simétrico")
+                continue
+            g = d["amp"] - 1
+            if g > 1e-10:
+                verdict = "<span style='color:#ef5350'>foco inestable (espiral hacia fuera)</span>"
+            elif g < -1e-10:
+                verdict = "<span style='color:#66BB6A'>foco estable (disipación numérica)</span>"
+            else:
+                verdict = "<span style='color:#4FC3F7'>conserva el centro</span>"
+            rows.append(head + f"rodea ω{'₁₂₃'[d['axis']]} · "
+                        f"<span style='font-family:Consolas,monospace'>|R|−1 = {g:+.2e}</span> → {verdict}")
+        self.eq_label.setText("<br>".join(rows))
 
     def _update_static_visibility(self):
         self.mesh_E.setVisible(self.chk_E.isChecked())

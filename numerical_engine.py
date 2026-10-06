@@ -6,49 +6,69 @@ para evaluar la conservación física de las integrales primeras."""
 import numpy as np
 from numpy.linalg import norm
 
-def euler(f, u0, delta, N):
+# Esquemas de un solo paso: dado u_n devuelven u_{n+1}. Todos comparten la firma
+# scheme(f, u, delta), de modo que integrate() puede usar cualquiera de ellos.
+
+def euler(f, u, delta):
+    return u + delta * f(u)
+
+def implicit_euler(f, u, delta, tol=1e-6, max_iter=100):
+    # Euler inverso: se resuelve Y = u_n + delta f(Y) por iteración de punto fijo (Y <- Y - R).
+    Y = u + delta * f(u)    # predictor: Euler explícito
+    for _ in range(max_iter):
+        R = Y - u - delta * f(Y)
+        Y = Y - R
+        if not norm(R) > tol:   # 'not >' para salir también si aparece NaN
+            break
+    return Y
+
+def crank_nicolson(f, u, delta, tol=1e-6, max_iter=100):
+    # Se resuelve Y = u_n + delta/2 (f(u_n) + f(Y)) por iteración de punto fijo (Y <- Y - R).
+    fn = f(u)
+    Y = u.copy()
+    for _ in range(max_iter):
+        R = Y - u - delta/2*(fn + f(Y))
+        Y = Y - R
+        if not norm(R) > tol:   # 'not >' para salir también si aparece NaN
+            break
+    return Y
+
+def runge_kutta_4(f, u, delta):
+    k1=f(u)
+    k2=f(u+delta*k1/2)
+    k3=f(u+delta*k2/2)
+    k4=f(u+delta*k3)
+    return u+delta*(k1+2*k2+2*k3+k4)/6
+
+# Funciones de amplificación R(z), z = λ·delta: al aplicar cada esquema a u' = λu
+# se obtiene u_{n+1} = R(z) u_n. El esquema es estable para ese modo si |R(z)| ≤ 1.
+
+def amplification_euler(z):
+    return 1 + z
+
+def amplification_implicit_euler(z):
+    return 1 / (1 - z)
+
+def amplification_crank_nicolson(z):
+    return (1 + z/2) / (1 - z/2)
+
+def amplification_runge_kutta_4(z):
+    return 1 + z + z**2/2 + z**3/6 + z**4/24
+
+def integrate(scheme, f, u0, delta, N):
+    # Prolonga la solución en el tiempo aplicando N veces el esquema de un paso.
     u0 = np.asarray(u0, dtype=float)
     u = np.zeros((N+1, u0.size))
     u[0, :] = u0
     for n in range(N):
-        u[n+1, :] = u[n, :] + delta * f(u[n, :])
-    return u
-
-def crank_nicolson(f, u0, delta, N, tol=1e-6, max_iter=100):
-    # Misma firma que euler y runge_kutta_4. En cada paso se resuelve
-    # Y = u_n + delta/2 (f(u_n) + f(Y)) por iteración de punto fijo (Y <- Y - R).
-    u0 = np.asarray(u0, dtype=float)
-    u = np.zeros((N+1, u0.size))
-    u[0, :] = u0
-    for n in range(0, N):
-        fn = f(u[n, :])
-        Y = u[n, :].copy()
-        for _ in range(max_iter):
-            R = Y - u[n, :] - delta/2*(fn + f(Y))
-            Y = Y - R
-            if not norm(R) > tol:   # 'not >' para salir también si aparece NaN
-                break
-        u[n+1, :] = Y
-    return u
-
-def runge_kutta_4(f, u0, delta, N):
-    u0 = np.asarray(u0, dtype=float)
-    u = np.zeros((N+1, u0.size))
-    u[0,:] = u0
-
-    for n in range(0,N):
-        k1=f(u[n,:])
-        k2=f(u[n,:]+delta*k1/2)
-        k3=f(u[n,:]+delta*k2/2)
-        k4=f(u[n,:]+delta*k3)
-        u[n+1,:]=u[n,:]+delta*(k1+2*k2+2*k3+k4)/6
+        u[n+1, :] = scheme(f, u[n, :], delta)
     return u
 
 def integration_final_state(scheme, f, u0, T, n):
     # Para la extrapolación de Richardson, lo que necesitamos es el estado final de la integración,
     # y resulta útil hacer explícito que llegamos hasta ese instante T utilizando n pasos.
     delta = T / n
-    traj = scheme(f, u0, delta, n)
+    traj = integrate(scheme, f, u0, delta, n)
     return traj[-1,:]
 
 def scheme_order(scheme, f, u0, T, n):
