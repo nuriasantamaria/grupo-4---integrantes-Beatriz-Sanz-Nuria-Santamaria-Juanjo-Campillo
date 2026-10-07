@@ -112,6 +112,37 @@ def polhode_family(I, twoT, n_levels=5, n_pts=200):
     return curves
 
 
+def exact_polhode(I, w0, n_pts=400):
+    I, w0 = np.asarray(I, dtype=float), np.asarray(w0, dtype=float)
+    twoT = 2 * float(kinetic_energy(w0, I))
+    if twoT <= 0:
+        return []
+    s = np.linspace(0, 2 * np.pi, n_pts)
+    P = np.zeros((n_pts, 3))
+    if is_degenerate(I):
+        if np.ptp(I) < 1e-6:
+            return []
+        k = int(np.argmax(np.abs(I - np.median(I))))
+        i, j = chart_axes(k)
+        r = math.hypot(w0[i], w0[j])
+        P[:, i], P[:, j], P[:, k] = r * np.cos(s), r * np.sin(s), w0[k]
+        return [P]
+    a, b, c = sorted_axes(I)
+    Ia, Ib, Ic = I[a], I[b], I[c]
+    L2 = float(angular_momentum_sq(w0, I))
+    if L2 >= twoT * Ib:
+        sign = 1.0 if w0[c] >= 0 else -1.0
+        P[:, a] = math.sqrt(max(twoT * Ic - L2, 0) / (Ia * (Ic - Ia))) * np.cos(s)
+        P[:, b] = math.sqrt(max(twoT * Ic - L2, 0) / (Ib * (Ic - Ib))) * np.sin(s)
+        P[:, c] = sign * np.sqrt(np.maximum(twoT - Ia * P[:, a] ** 2 - Ib * P[:, b] ** 2, 0) / Ic)
+    else:
+        sign = 1.0 if w0[a] >= 0 else -1.0
+        P[:, c] = math.sqrt(max(L2 - twoT * Ia, 0) / (Ic * (Ic - Ia))) * np.cos(s)
+        P[:, b] = math.sqrt(max(L2 - twoT * Ia, 0) / (Ib * (Ib - Ia))) * np.sin(s)
+        P[:, a] = sign * np.sqrt(np.maximum(twoT - Ib * P[:, b] ** 2 - Ic * P[:, c] ** 2, 0) / Ia)
+    return [P]
+
+
 def body_half_sizes(I, min_rel=0.15):
     I1, I2, I3 = (float(x) for x in I)
     s = np.sqrt(np.maximum([I2 + I3 - I1, I1 + I3 - I2, I1 + I2 - I3], 0.0))
@@ -411,6 +442,7 @@ def run_preview(cfg: SimConfig, T_total):
 
 
 SIM_COLORS = ["#7FE7FF", "#FFA07A", "#C6FF7A"]
+POLHODE_COLOR = "#FFD740"
 AXIS_COLORS = ["#FF6B6B", "#69F0AE", "#D1A8FF"]
 BG = "#3a3d42"
 PANEL = "#2f3236"
@@ -808,6 +840,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.frame = 0
         self.family_items = []
         self.separatrix_items = []
+        self.polhode_items = []
         self.sat_items = []
         self._plane_k, self._plane_sign_val = 1, 1
 
@@ -854,7 +887,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.sat_view = gl.GLViewWidget()
         self.sat_view.setBackgroundColor(VIEW_BG)
         self.phase_card = Card("Espacio de fases (ω₁, ω₂, ω₃) — Poinsot", self.phase_view,
-                               "elipsoide T · elipsoide ‖L‖ · separatriz")
+                               "elipsoide T · elipsoide ‖L‖ · separatriz · polodia exacta de Ω₀")
         self.sat_card = Card("Orientación del satélite (marco inercial)", self.sat_view,
                              "ejes cuerpo e₁ e₂ e₃ · L (amarillo) · ω (blanco)")
 
@@ -1056,24 +1089,27 @@ class MainWindow(QtWidgets.QMainWindow):
         self.chk_L = QtWidgets.QCheckBox("Elipsoide de momento")
         self.chk_sep = QtWidgets.QCheckBox("Separatriz")
         self.chk_fam = QtWidgets.QCheckBox("Familia de polodias")
-        for i, c in enumerate((self.chk_E, self.chk_L, self.chk_sep, self.chk_fam)):
+        self.chk_pol = QtWidgets.QCheckBox("Polodia exacta de Ω₀")
+        self.chk_pol.setToolTip("Intersección exacta de los elipsoides de energía y de momento "
+                                "que pasa por Ω₀ de cada simulación activa")
+        for i, c in enumerate((self.chk_E, self.chk_L, self.chk_sep, self.chk_fam, self.chk_pol)):
             c.setChecked(True)
             c.toggled.connect(self._update_static_visibility)
             g.addWidget(c, 1 + i // 2, i % 2)
-        g.addWidget(QtWidgets.QLabel("Forma del satélite"), 3, 0)
+        g.addWidget(QtWidgets.QLabel("Forma del satélite"), 4, 0)
         self.shape_combo = QtWidgets.QComboBox()
         self.shape_combo.addItems(["Satélite", "Paralelepípedo", "Elipsoide"])
         self.shape_combo.currentIndexChanged.connect(self._rebuild_satellites)
-        g.addWidget(self.shape_combo, 3, 1)
-        g.addWidget(QtWidgets.QLabel("Estela (puntos)"), 4, 0)
+        g.addWidget(self.shape_combo, 4, 1)
+        g.addWidget(QtWidgets.QLabel("Estela (puntos)"), 5, 0)
         self.trail_spin = QtWidgets.QSpinBox()
         self.trail_spin.setRange(50, 200000)
         self.trail_spin.setValue(4000)
         self.trail_spin.setSingleStep(500)
-        g.addWidget(self.trail_spin, 4, 1)
+        g.addWidget(self.trail_spin, 5, 1)
         self.chk_log = QtWidgets.QCheckBox("Escala logarítmica |Δ| en derivas")
         self.chk_log.toggled.connect(self._on_log_toggled)
-        g.addWidget(self.chk_log, 5, 0, 1, 2)
+        g.addWidget(self.chk_log, 6, 0, 1, 2)
         lay.addWidget(box)
 
         box = QtWidgets.QGroupBox("Extrapolación de Richardson")
@@ -1142,6 +1178,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.eq_points = gl.GLScatterPlotItem(pos=np.zeros((1, 3)), size=14, pxMode=True)
         self.eq_points.setGLOptions("translucent")
         v.addItem(self.eq_points)
+
+        self.w0_points = gl.GLScatterPlotItem(pos=np.zeros((1, 3)), size=13, pxMode=True)
+        self.w0_points.setGLOptions("translucent")
+        v.addItem(self.w0_points)
 
         self.prev_lines, self.trail_lines, self.heads = [], [], []
         for cfg in DEFAULT_CONFIGS:
@@ -1528,6 +1568,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self.phase_view.addItem(it)
             self.family_items.append(it)
 
+        self._update_exact_polhodes()
+
         lim = 1.25 * max(np.max(semi_E), np.max(semi_L), 1e-3)
         for k in range(3):
             e = np.zeros(3)
@@ -1585,6 +1627,33 @@ class MainWindow(QtWidgets.QMainWindow):
             it.setVisible(self.chk_sep.isChecked())
         for it in self.family_items:
             it.setVisible(self.chk_fam.isChecked())
+        for it in self.polhode_items:
+            it.setVisible(self.chk_pol.isChecked())
+        self.w0_points.setVisible(self.chk_pol.isChecked())
+
+    def _update_exact_polhodes(self):
+        for it in self.polhode_items:
+            self.phase_view.removeItem(it)
+        self.polhode_items = []
+        seen, pos, cols = set(), [], []
+        for c in self.configs():
+            if not c.enabled:
+                continue
+            pos.append(c.w0)
+            cols.append(rgba(c.color, 1.0, 1.3))
+            if (c.I, c.w0) in seen:
+                continue
+            seen.add((c.I, c.w0))
+            for P in exact_polhode(c.I, c.w0, 800):
+                it = gl.GLLinePlotItem(pos=P, color=rgba(POLHODE_COLOR, 0.95), width=3.5,
+                                       antialias=True)
+                it.setGLOptions("translucent")
+                self.phase_view.addItem(it)
+                self.polhode_items.append(it)
+        if pos:
+            self.w0_points.setData(pos=np.array(pos, dtype=float), color=np.array(cols))
+        else:
+            self.w0_points.setData(pos=np.zeros((0, 3)))
 
     def _rebuild_satellites(self):
         for group in self.sat_items:
