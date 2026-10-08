@@ -20,6 +20,7 @@ def crank_nicolson(U, t, delta, F):
 			return U
 		Y = Y_next
 
+
 "Write a function called RK4 to integrate one step."
 def rk4(U, t, delta, F):
     k1 = F(U, t)
@@ -39,11 +40,24 @@ def inverse_euler(U, t, delta, F):
             U[1, :] = Y_next
             return U
         Y = Y_next
+        return U
+    
+def oscilador(U):
+    return np.array([U[1], -U[0]])
+
+def partition(a,b,N):
+     return np.array([a+i*(b-a)/N for i in range(N+1)])
 
 "Write a function to integrate a Cauchy problem. Temporal scheme, initial"
 "condition and the function F (U, t) of the Cauchy problem should be input"
 "arguments."
-
+scheme = {euler, crank_nicolson, rk4, inverse_euler}
 def integrate_cauchy(U0, t0, tf, delta, F, scheme):
-      scheme = {euler, crank_nicolson, rk4, inverse_euler}
-      return
+      Nv=len(U0)
+      N=len(tf-t0) -1
+      U=np.zeros((N+1,Nv))
+      U[0,:]=U0
+      for n in range(0,N):
+          U[n+1,:]=scheme(U[n,:],t0+n*delta,delta,F)
+      return U
+
