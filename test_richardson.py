@@ -1,10 +1,10 @@
 import numpy as np
-from numerical_engine import runge_kutta_4, integration_final_state, richardson_error, scheme_order
+from numerical_engine import runge_kutta_4, final_state, richardson_error, scheme_order
 from numerical_engine import richardson_extrapolation
 from functools import partial
 from space_physics import euler_equations
 
-f_test = lambda u: -u
+f_test = lambda u, t: -u
 #traj = runge_kutta_4(f_test, [1.0], delta=0.1, N=10)
 #print(traj[-1, 0], np.exp(-1.0))
 
@@ -34,8 +34,8 @@ f_test = lambda u: -u
 #print (scheme_order(runge_kutta_4, f, u0, T=10, n=800))
 
 exacta = np.exp(-1.0); n=10
-w_coarse = integration_final_state(runge_kutta_4, f_test, [1.0], 1.0, n)
-w_fine = integration_final_state(runge_kutta_4, f_test, [1.0], 1.0, 2*n)
+w_coarse = final_state(runge_kutta_4, f_test, [1.0], 1.0, n)
+w_fine = final_state(runge_kutta_4, f_test, [1.0], 1.0, 2*n)
 w_extrap = richardson_extrapolation(runge_kutta_4, f_test, [1.0], 1.0, n, p=4)
 
 print("error n=10 :", abs(w_coarse - exacta))

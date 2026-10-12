@@ -120,7 +120,7 @@ def body_half_sizes(I, min_rel=0.15):
     s = s / s.max()
     return np.maximum(s, min_rel)
 
-def rigid_body_rhs(u, I_mat):
+def rigid_body_rhs(u, t, I_mat):
     w1, w2, w3, q0, q1, q2, q3 = u
     dw = euler_equations(u[:3], I_mat)
     return np.array([dw[0], dw[1], dw[2],
@@ -162,9 +162,10 @@ METHOD_SHORT = {M_EULER: "Euler", M_BE: "Euler imp.", M_CN: "C-N", M_RK4: "RK4"}
 DIVERGENCE_LIMIT = 1e6
 
 
-def integrate(method, y0, dt, I, n):
+def integrate(method, y0, dt, I, n, t0=0.0):
+    t = t0 + dt * np.arange(n + 1)
     with np.errstate(all="ignore"):
-        out = ne.integrate(SCHEMES[method], make_rhs(I), np.asarray(y0, dtype=float), dt, n)
+        out = ne.cauchy_problem(make_rhs(I), np.asarray(y0, dtype=float), t, SCHEMES[method])
         bad = ~(np.abs(out[:, :3]).sum(axis=1) < DIVERGENCE_LIMIT)
     if bad.any():
         out[np.argmax(bad):] = np.nan
@@ -183,7 +184,7 @@ def richardson_analysis(cfg, T):
         u_extr = ne.richardson_extrapolation(scheme, f, u0, T, n, p)
     # error real de ω en T frente a la solución exacta (Richardson lo estima sin conocerla)
     with np.errstate(all="ignore"):
-        Y = integrate(cfg.method, u0, T / n, np.asarray(cfg.I, dtype=float), n)
+        Y = integrate(cfg.method, u0, T / (2 * n), np.asarray(cfg.I, dtype=float), 2 * n)
         w_ex = EulerExact(cfg.I, cfg.w0).omega(np.array([float(T)]))[0]
         err_real = float(np.linalg.norm(Y[-1, :3] - w_ex))
     return {"n": n, "p": p, "p_est": float(p_est), "err": float(err), "u_extr": u_extr,
@@ -492,7 +493,7 @@ class Simulation:
     def advance(self, n):
         if self.diverged or n <= 0:
             return
-        Y = integrate(self.cfg.method, self.y, self.cfg.dt, self.I, n)[1:]
+        Y = integrate(self.cfg.method, self.y, self.cfg.dt, self.I, n, t0 = self.t)[1:]
         ok = np.isfinite(Y).all(axis=1)
         if not ok.all():
             Y = Y[:np.argmin(ok)]
