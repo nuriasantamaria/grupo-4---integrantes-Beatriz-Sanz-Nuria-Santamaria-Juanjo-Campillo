@@ -4,6 +4,7 @@ muestra las órbitas en el espacio de fases de Poinsot, la deriva de la energía
 momento angular, la orientación del satélite en 3D y el plano de fases alrededor de
 cada punto de equilibrio para analizar su estabilidad."""
 
+import html
 import math
 import sys
 import time
@@ -18,8 +19,14 @@ from OpenGL.GL import GL_CULL_FACE
 from pyqtgraph.opengl.GLGraphicsItem import GLOptions
 
 import numerical_engine as ne
-from space_physics import (euler_equations, kinetic_energy, angular_momentum_sq,
-                           equilibrium_analysis, EulerExact, euler_matches_exact)
+from space_physics import (euler_equations, kinetic_energy, angular_momentum_sq, equilibrium_analysis,
+                           EulerExact, euler_matches_exact,
+                           sorted_axes, is_degenerate, poinsot_semiaxes, regime, surrounded_axis,
+                           separatrix_curves, polhode_family, chart_axes, reduced_flow, phase_plane_orbits,
+                           chart_level_curve, surface_mismatch, noise_floor, grade, grade_pair,
+                           predicted_errors, TINY_R, TINY_PSI, convergence_study,
+                           equilibrium_diagnosis as _equilibrium_diagnosis,
+                           linear_step_errors as _linear_step_errors)
 
 
 def quat_to_matrix(q):
@@ -32,95 +39,13 @@ def quat_to_matrix(q):
     ])
 
 
-def sorted_axes(I):
-    a, b, c = np.argsort(np.asarray(I, dtype=float))
-    return int(a), int(b), int(c)
-
-
-def is_degenerate(I, tol=1e-6):
-    Is = np.sort(np.asarray(I, dtype=float))
-    return (Is[1] - Is[0] < tol) or (Is[2] - Is[1] < tol)
-
-
-def poinsot_semiaxes(I, w0):
-    I = np.asarray(I, dtype=float)
-    twoT = 2 * kinetic_energy(w0, I)
-    L = np.sqrt(angular_momentum_sq(w0, I))
-    return np.sqrt(twoT / I), L / I
-
-
-def regime(I, w0):
-    if is_degenerate(I):
-        return "trompo simétrico"
-    I = np.asarray(I, dtype=float)
-    _, b, _ = sorted_axes(I)
-    twoT = 2 * kinetic_energy(w0, I)
-    L2 = angular_momentum_sq(w0, I)
-    D = L2 - twoT * I[b]
-    if abs(D) < 1e-3 * twoT * I[b]:
-        return "≈ separatriz (inestable)"
-    return "precesa eje mayor (estable)" if D > 0 else "precesa eje menor (estable)"
-
-
-def separatrix_curves(I, twoT, n_pts=300):
-    if is_degenerate(I) or twoT <= 0:
-        return []
-    I = np.asarray(I, dtype=float)
-    a, b, c = sorted_axes(I)
-    Ia, Ib, Ic = I[a], I[b], I[c]
-    k = math.sqrt(Ia * (Ib - Ia) / (Ic * (Ic - Ib)))
-    s = np.linspace(0, 2 * np.pi, n_pts)
-    A = math.sqrt(twoT / (Ia + Ic * k * k))
-    B = math.sqrt(twoT / Ib)
-    curves = []
-    for sign in (+1, -1):
-        P = np.zeros((n_pts, 3))
-        P[:, a] = A * np.cos(s)
-        P[:, b] = B * np.sin(s)
-        P[:, c] = sign * k * A * np.cos(s)
-        curves.append(P)
-    return curves
-
-
-def polhode_family(I, twoT, n_levels=5, n_pts=200):
-    if is_degenerate(I) or twoT <= 0:
-        return []
-    I = np.asarray(I, dtype=float)
-    a, b, c = sorted_axes(I)
-    Ia, Ib, Ic = I[a], I[b], I[c]
-    s = np.linspace(0, 2 * np.pi, n_pts)
-    curves = []
-    levels = np.linspace(0.15, 0.9, n_levels)
-
-    for f in levels:
-        L2 = twoT * (Ia + f * (Ib - Ia))
-        wc = math.sqrt((L2 - twoT * Ia) / (Ic * (Ic - Ia))) * np.cos(s)
-        wb = math.sqrt((L2 - twoT * Ia) / (Ib * (Ib - Ia))) * np.sin(s)
-        wa = np.sqrt(np.maximum(twoT - Ib * wb ** 2 - Ic * wc ** 2, 0) / Ia)
-        for sign in (+1, -1):
-            P = np.zeros((n_pts, 3))
-            P[:, a], P[:, b], P[:, c] = sign * wa, wb, wc
-            curves.append(P)
-
-    for f in levels:
-        L2 = twoT * (Ic - f * (Ic - Ib))
-        wa = math.sqrt((twoT * Ic - L2) / (Ia * (Ic - Ia))) * np.cos(s)
-        wb = math.sqrt((twoT * Ic - L2) / (Ib * (Ic - Ib))) * np.sin(s)
-        wc = np.sqrt(np.maximum(twoT - Ia * wa ** 2 - Ib * wb ** 2, 0) / Ic)
-        for sign in (+1, -1):
-            P = np.zeros((n_pts, 3))
-            P[:, a], P[:, b], P[:, c] = wa, wb, sign * wc
-            curves.append(P)
-    return curves
-
-
 def body_half_sizes(I, min_rel=0.15):
     I1, I2, I3 = (float(x) for x in I)
     s = np.sqrt(np.maximum([I2 + I3 - I1, I1 + I3 - I2, I1 + I2 - I3], 0.0))
     s = s / s.max()
     return np.maximum(s, min_rel)
 
-def rigid_body_rhs(u, I_mat):
+def rigid_body_rhs(u, t, I_mat):
     w1, w2, w3, q0, q1, q2, q3 = u
     dw = euler_equations(u[:3], I_mat)
     return np.array([dw[0], dw[1], dw[2],
@@ -159,12 +84,21 @@ AMPLIFICATION = {
 
 METHOD_SHORT = {M_EULER: "Euler", M_BE: "Euler imp.", M_CN: "C-N", M_RK4: "RK4"}
 
+
+def equilibrium_diagnosis(cfg):
+    return _equilibrium_diagnosis(cfg.I, cfg.w0, AMPLIFICATION[cfg.method], cfg.dt)
+
+
+def linear_step_errors(cfg):
+    return _linear_step_errors(cfg.I, cfg.w0, AMPLIFICATION[cfg.method], cfg.dt)
+
 DIVERGENCE_LIMIT = 1e6
 
 
-def integrate(method, y0, dt, I, n):
+def integrate(method, y0, dt, I, n, t0=0.0):
+    t = t0 + dt * np.arange(n + 1)
     with np.errstate(all="ignore"):
-        out = ne.integrate(SCHEMES[method], make_rhs(I), np.asarray(y0, dtype=float), dt, n)
+        out = ne.cauchy_problem(make_rhs(I), np.asarray(y0, dtype=float), t, SCHEMES[method])
         bad = ~(np.abs(out[:, :3]).sum(axis=1) < DIVERGENCE_LIMIT)
     if bad.any():
         out[np.argmax(bad):] = np.nan
@@ -181,78 +115,44 @@ def richardson_analysis(cfg, T):
         p_est = ne.scheme_order(scheme, f, u0, T, n)
         err = ne.richardson_error(scheme, f, u0, T, n, p)
         u_extr = ne.richardson_extrapolation(scheme, f, u0, T, n, p)
-    # error real de ω en T frente a la solución exacta (Richardson lo estima sin conocerla)
+    # error real de ω en T frente a la exacta, de la solución fina (2n pasos): es la que Richardson estima y corrige
     with np.errstate(all="ignore"):
-        Y = integrate(cfg.method, u0, T / n, np.asarray(cfg.I, dtype=float), n)
+        Y = integrate(cfg.method, u0, T / (2 * n), np.asarray(cfg.I, dtype=float), 2 * n)
         w_ex = EulerExact(cfg.I, cfg.w0).omega(np.array([float(T)]))[0]
         err_real = float(np.linalg.norm(Y[-1, :3] - w_ex))
     return {"n": n, "p": p, "p_est": float(p_est), "err": float(err), "u_extr": u_extr,
             "err_real": err_real}
 
 
-def surrounded_axis(I, w0):
-    if is_degenerate(I):
-        return None
-    I = np.asarray(I, dtype=float)
-    a, b, c = sorted_axes(I)
-    twoT = 2 * kinetic_energy(w0, I)
-    D = angular_momentum_sq(w0, I) - twoT * I[b]
-    if abs(D) < 1e-3 * twoT * I[b]:
-        return None
-    return c if D > 0 else a
+# --- ¿cuándo un error es relevante? Se compara con el ruido de redondeo y con lo visible en pantalla
+DIVERGENCE_FACTOR = 1e3          # ‖ω‖ > 1e3 · (máximo posible en la órbita exacta) ⇒ la simulación diverge
+COARSE_BETA_DT = 0.25          # Δt·β por encima de esto (≲ 25 pasos por ciclo) se avisa de que Δt es grueso
+GRADE_WORDS = ("≈ 0", "ínfimo", "relevante")
+GRADE_COLORS = ("#8a8f98", "#9fb4c9", "#FFD740")
+# orden global (en Δt) del error de módulo y de fase de cada esquema en el centro lineal
+SCHEME_ORDER = {M_EULER: ("Δt", "Δt²"), M_BE: ("Δt", "Δt²"),
+                M_CN: ("nulo (|R| = 1)", "Δt²"), M_RK4: ("Δt⁵", "Δt⁴")}
 
 
-def equilibrium_diagnosis(cfg):
-    I, w0 = np.asarray(cfg.I, dtype=float), np.asarray(cfg.w0, dtype=float)
-    twoT = 2 * float(kinetic_energy(w0, I))
-    eqs = equilibrium_analysis(I, twoT)
-    axis = surrounded_axis(I, w0)
-    amp = None
-    if axis is not None and eqs[axis]["type"] == "centro":
-        beta = float(np.max(np.abs(eqs[axis]["eigvals"].imag)))
-        amp = abs(AMPLIFICATION[cfg.method](1j * beta * cfg.dt))
-    return {"eqs": eqs, "axis": axis, "amp": amp}
+def scheme_verdict(lin, n):
+    """Qué prevé la teoría lineal para el módulo y la fase tras n pasos: (palabra, gravedad) de cada uno."""
+    r, psi = predicted_errors(lin, n)
+    gr, gp = grade_pair(r, psi, n)
+    mod = "se conserva" if gr == 0 else ("crece" if lin["dmod"] > 0 else "decae")
+    pha = "sin error" if gp == 0 else ("se retrasa" if lin["dphase"] < 0 else "se adelanta")
+    return (mod, gr), (pha, gp)
 
 
-def linear_step_errors(cfg):
-    """Error por paso del esquema frente a la solución exacta e^{z} en el centro que rodea la
-    órbita (pequeñas oscilaciones): módulo |R(iβΔt)| − 1 y fase arg R − βΔt. None si no hay centro."""
-    I, w0 = np.asarray(cfg.I, dtype=float), np.asarray(cfg.w0, dtype=float)
-    axis = surrounded_axis(I, w0)
-    if axis is None:
-        return None
-    twoT = 2 * float(kinetic_energy(w0, I))
-    e = equilibrium_analysis(I, twoT)[axis]
-    if e["type"] != "centro":
-        return None
-    beta = float(np.max(np.abs(e["eigvals"].imag)))
-    if beta <= 0:
-        return None
-    R = complex(AMPLIFICATION[cfg.method](1j * beta * cfg.dt))
-    return {"axis": axis, "beta": beta, "R": R, "dmod": abs(R) - 1.0,
-            "dphase": float(np.angle(R) - beta * cfg.dt), "period": 2 * math.pi / beta}
-
-
-SURFACE_TOL = 1e-3
-
-
-def surface_mismatch(ref_cfg, cfg, tol=SURFACE_TOL):
-    """None si la trayectoria de cfg yace (a tol) sobre las superficies de ref_cfg
-    (elipsoides de energía y momento); si no, dict(same_I, dT, dL) con las diferencias
-    relativas de energía y de ‖L‖²."""
-    Ir, Ic = np.asarray(ref_cfg.I, dtype=float), np.asarray(cfg.I, dtype=float)
-    Tr, Tc = float(kinetic_energy(ref_cfg.w0, Ir)), float(kinetic_energy(cfg.w0, Ic))
-    Lr, Lc = (float(angular_momentum_sq(ref_cfg.w0, Ir)),
-              float(angular_momentum_sq(cfg.w0, Ic)))
-
-    def rel(a, b):
-        return (b / a - 1.0) if a > 0 else (0.0 if b == 0 else math.inf)
-
-    same_I = bool(np.allclose(Ir, Ic, rtol=1e-9, atol=1e-12))
-    dT, dL = rel(Tr, Tc), rel(Lr, Lc)
-    if same_I and abs(dT) <= tol and abs(dL) <= tol:
-        return None
-    return {"same_I": same_I, "dT": dT, "dL": dL}
+def orbit_status(cfg):
+    """Estabilidad FÍSICA de la órbita (solo depende de I y Ω₀): (texto, tipo)."""
+    r = regime(cfg.I, cfg.w0)
+    if "separatriz" in r:
+        return "inestable · sobre la separatriz (vuelca)", "inestable"
+    if "trompo" in r:
+        return "trompo simétrico · precesión uniforme", "marginal"
+    ax = surrounded_axis(cfg.I, cfg.w0)
+    nombre = "mayor" if "mayor" in r else "menor"
+    return f"estable · rodea el eje {nombre}" + (f" e{'₁₂₃'[ax]}" if ax is not None else ""), "estable"
 
 
 STABILITY_COLORS = {"estable": "#69F0AE", "marginal": "#80D8FF", "inestable": "#FF6B6B"}
@@ -264,73 +164,6 @@ def regime_color(r):
     if "estable" in r:
         return STABILITY_COLORS["estable"]
     return STABILITY_COLORS["marginal"]
-
-
-def chart_axes(k):
-    return (k + 1) % 3, (k + 2) % 3
-
-
-def reduced_flow(I, twoT, k, sign, X, Y):
-    I = np.asarray(I, dtype=float)
-    i, j = chart_axes(k)
-    X, Y = np.asarray(X, dtype=float), np.asarray(Y, dtype=float)
-    W = np.zeros((3,) + X.shape)
-    W[i], W[j] = X, Y
-    W[k] = sign * np.sqrt(np.maximum(twoT - I[i] * X ** 2 - I[j] * Y ** 2, 0) / I[k])
-    dW = euler_equations(W, np.diag(I))
-    return dW[i], dW[j]
-
-
-def phase_plane_orbits(I, twoT, k, n_levels=9, n_pts=400):
-    if is_degenerate(I) or twoT <= 0:
-        return [], []
-    I = np.asarray(I, dtype=float)
-    i, j = chart_axes(k)
-    a, b = I[i] * (I[i] - I[k]), I[j] * (I[j] - I[k])
-    fr = np.linspace(0.12, 1.0, n_levels) ** 2
-    qa, qb = a * twoT / I[i], b * twoT / I[j]
-    if a * b > 0:
-        levels = fr * (qa if abs(qa) > abs(qb) else qb)
-        seps = []
-    else:
-        levels = np.concatenate([fr * qa, fr * qb])
-        seps = chart_level_curve(I, twoT, k, 0.0, n_pts)
-    orbits = [P for c in levels for P in chart_level_curve(I, twoT, k, c, n_pts)]
-    return orbits, seps
-
-
-def chart_level_curve(I, twoT, k, c, n_pts=400):
-    I = np.asarray(I, dtype=float)
-    i, j = chart_axes(k)
-    a, b = I[i] * (I[i] - I[k]), I[j] * (I[j] - I[k])
-    xm, ym = math.sqrt(twoT / I[i]), math.sqrt(twoT / I[j])
-
-    def clip(x, y):
-        P = np.column_stack([x, y]).astype(float)
-        P[I[i] * P[:, 0] ** 2 + I[j] * P[:, 1] ** 2 > twoT * (1 + 1e-9)] = np.nan
-        return P
-
-    if a * b > 0:
-        if c / a <= 0:
-            return []
-        s = np.linspace(0, 2 * np.pi, n_pts)
-        return [clip(math.sqrt(c / a) * np.cos(s), math.sqrt(c / b) * np.sin(s))]
-
-    swap = a < 0
-    A, B, XM, YM = (b, a, ym, xm) if swap else (a, b, xm, ym)
-    if c > 0:
-        r, q = math.sqrt(c / A), math.sqrt(c / -B)
-        s = np.linspace(-1, 1, n_pts) * math.asinh(YM / q)
-        raw = [(sg * r * np.cosh(s), q * np.sinh(s)) for sg in (1, -1)]
-    elif c < 0:
-        r, q = math.sqrt(c / B), math.sqrt(-c / A)
-        s = np.linspace(-1, 1, n_pts) * math.asinh(XM / q)
-        raw = [(q * np.sinh(s), sg * r * np.cosh(s)) for sg in (1, -1)]
-    else:
-        m = math.sqrt(A / -B)
-        u = np.linspace(-XM, XM, n_pts)
-        raw = [(u, m * u), (u, -m * u)]
-    return [clip(v, u) if swap else clip(u, v) for u, v in raw]
 
 
 def quiver_segments(X, Y, U, V, length, head=0.38, angle=26.0):
@@ -374,9 +207,12 @@ class Simulation:
         self.y = (*w0, 1.0, 0.0, 0.0, 0.0)
         self.n = 1
         self.diverged = False
+        self.error = None                        # texto si numerical_engine lanzó una excepción
         self.T0 = float(kinetic_energy(w0, self.I))
         self.L0 = float(np.sqrt(angular_momentum_sq(w0, self.I)))
         self.Ls0 = self.I * w0
+        self._blow = DIVERGENCE_FACTOR * max(math.sqrt(2.0 * self.T0 / float(np.min(self.I))),
+                                             float(np.linalg.norm(w0)))
         self.exact = EulerExact(self.I, w0)
         self.view_n = None                       # None = en vivo; k = se muestra el historial hasta la fila k-1
         self._Y = np.empty((self.CHUNK, 7))
@@ -492,8 +328,13 @@ class Simulation:
     def advance(self, n):
         if self.diverged or n <= 0:
             return
-        Y = integrate(self.cfg.method, self.y, self.cfg.dt, self.I, n)[1:]
-        ok = np.isfinite(Y).all(axis=1)
+        try:
+            Y = integrate(self.cfg.method, self.y, self.cfg.dt, self.I, n, t0=self.t)[1:]
+        except Exception as exc:                # p. ej. Newton sin converger en un esquema implícito
+            self.diverged, self.error = True, f"{type(exc).__name__}: {exc}"
+            return
+        with np.errstate(all="ignore"):         # diverge al no ser finito o al superar con creces lo posible
+            ok = np.isfinite(Y).all(axis=1) & (np.linalg.norm(Y[:, :3], axis=1) <= self._blow)
         if not ok.all():
             Y = Y[:np.argmin(ok)]
             self.diverged = True
@@ -531,7 +372,7 @@ def run_preview(cfg: SimConfig, T_total, should_cancel=None):
     return {"t": sim.times.copy(), "W": sim.Y[:, :3].copy(),
             "dT": sim.dT.copy(), "dL": sim.dL.copy(),
             "r": sim.err_r.copy(), "psi": sim.err_psi.copy(), "lag": sim.err_lag.copy(),
-            "diverged": sim.diverged, "truncated": n == MAX_PREVIEW_STEPS}
+            "diverged": sim.diverged, "error": sim.error, "truncated": n == MAX_PREVIEW_STEPS}
 
 
 PREVIEW_CHUNK = 2000
@@ -554,7 +395,12 @@ class PreviewWorker(QtCore.QThread):
         t0 = time.perf_counter()
         out = {}
         for k, cfg in self.jobs:
-            r = run_preview(cfg, self.T, lambda: self._cancel)
+            try:
+                r = run_preview(cfg, self.T, lambda: self._cancel)
+            except Exception as exc:            # el hilo nunca debe morir en silencio
+                r = {"t": np.zeros(1), "W": np.zeros((1, 3)), "dT": np.zeros(1), "dL": np.zeros(1),
+                     "r": np.zeros(1), "psi": np.zeros(1), "lag": np.zeros(1), "diverged": True,
+                     "error": f"{type(exc).__name__}: {exc}", "truncated": False}
             if r is None:
                 return
             out[k] = r
@@ -589,6 +435,7 @@ def axis_label_style():
 
 
 def pill(text, color):
+    text = text.replace(" ", "&nbsp;")           # una etiqueta no se parte en dos líneas
     return (f"<span style='background-color:{color}; color:#04123a; font-weight:700'>"
             f"&nbsp;{text}&nbsp;</span>")
 
@@ -2054,7 +1901,61 @@ PRESET_NOTES = {
         "Euler explícito, implícito y C-N con Δt = 0.08 girando sobre el eje de menor inercia: "
         "observa si la energía crece, decae o se conserva.",
 }
+LOG_PRESETS = ("Comparar integradores (mismo Δt)", "Euler vs Crank-Nicolson vs RK4 (Δt grande)",
+               "Euler explícito vs implícito vs C-N (Δt grande)")
 DEFAULT_PRESET = "Comparar integradores (mismo Δt)"
+
+
+HELP_HTML = """
+<h2>Atajos</h2>
+<table cellspacing="6">
+<tr><td><b>Espacio</b></td><td>iniciar / pausar</td></tr>
+<tr><td><b>R</b></td><td>reiniciar (t = 0)</td></tr>
+<tr><td><b>P</b></td><td>recalcular la previsualización</td></tr>
+<tr><td><b>,</b> &nbsp; <b>.</b></td><td>retroceder / avanzar un paso de vista</td></tr>
+<tr><td><b>Ctrl+1 … Ctrl+5</b></td><td>cambiar de pestaña</td></tr>
+<tr><td><b>F1</b></td><td>esta ayuda</td></tr>
+</table>
+
+<h2>Las tres líneas de cada ficha de estabilidad</h2>
+<ul>
+<li><b>Órbita</b> (<span style="color:{ok}">estable</span> · <span style="color:{mar}">marginal</span> ·
+<span style="color:{bad}">inestable</span>): propiedad <i>física</i>; sólo depende de I y de Ω₀
+(¿rodea el eje mayor/menor, el intermedio, o está sobre la separatriz?).</li>
+<li><b>Esquema</b>: lo que la teoría lineal prevé para el método numérico elegido y Δt en el centro
+que rodea la órbita (módulo y fase por paso, extrapolado al horizonte de la previsualización).
+No depende del eje: es el comportamiento del <i>método</i>.</li>
+<li><b>Observado</b>: lo medido en la simulación frente a la solución exacta, en el instante mostrado.</li>
+</ul>
+
+<h2>Error de módulo y de fase</h2>
+<p>La órbita exacta se recorre con una amplitud y una velocidad angular de fase. El
+<b>error de módulo</b> r es la desviación relativa de la amplitud (r &gt; 0: el esquema inyecta energía de
+oscilación; r &lt; 0: la disipa). El <b>error de fase</b> ψ es cuánto se adelanta (+) o se retrasa (−) la
+solución numérica sobre la exacta, en grados de ciclo (y su equivalente en segundos).</p>
+<p>Cada error se clasifica comparándolo con el ruido de redondeo acumulado (≈ 50·ε·√n) y con lo
+visible en una gráfica:</p>
+<ul>
+<li><span style="color:{g0}"><b>≈ 0</b></span>: no se distingue del redondeo de la máquina; se puede ignorar.</li>
+<li><span style="color:{g1}"><b>ínfimo</b></span>: real, pero por debajo de 10<sup>−6</sup> (módulo) o 10<sup>−3</sup>° (fase);
+invisible en cualquier gráfica.</li>
+<li><span style="color:{g2}"><b>relevante</b></span>: hay que tenerlo en cuenta.</li>
+</ul>
+<p>Teoría (centro lineal): Euler explícito → módulo crece, fase se retrasa; Euler implícito → módulo
+decae, fase se retrasa; Crank–Nicolson → módulo se conserva (|R| = 1), fase se retrasa; RK4 → error
+minúsculo en ambos (Δt⁵ en módulo, Δt⁴ en fase).</p>
+
+<h2>Otros avisos</h2>
+<ul>
+<li><b>Divergió</b>: ‖ω‖ supera 10³ veces lo posible en la órbita exacta; esa simulación se congela y las
+demás continúan. La simulación se pausa sólo cuando divergen todas las activas.</li>
+<li><b>Falló</b>: <code>numerical_engine</code> lanzó una excepción (p. ej. Newton sin converger); se congela igual
+y el mensaje del error aparece en la ficha y en la barra de estado.</li>
+<li><b>Δt demasiado grande</b>: Δt·β &gt; 0,25, es decir, menos de ≈ 25 pasos por ciclo de la oscilación.</li>
+<li><b>Convergencia</b>: pendiente log-log del error frente a Δt; debe coincidir con el orden teórico del
+esquema mientras el error esté por encima del ruido de redondeo.</li>
+</ul>
+"""
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -2081,6 +1982,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._div_notified = set()
         self._sat_key = None
         self._last_cfgs = None
+        self._lin_cache = {}
+        self._w_range_key = None
 
         self._build_ui()
         self._build_phase_items()
@@ -2098,6 +2001,7 @@ class MainWindow(QtWidgets.QMainWindow):
         for key, slot in (("Space", self.toggle_run), ("R", self.reset),
                           ("P", self.compute_preview)):
             QtGui.QShortcut(QtGui.QKeySequence(key), self, activated=slot)
+        QtGui.QShortcut(QtGui.QKeySequence("F1"), self, activated=self.show_help)
         QtGui.QShortcut(QtGui.QKeySequence("."), self, activated=self.step_forward)
         QtGui.QShortcut(QtGui.QKeySequence(","), self, activated=self.step_back)
         for k in range(self.view_tabs.count()):
@@ -2306,16 +2210,24 @@ class MainWindow(QtWidgets.QMainWindow):
         p.getAxis("left").enableAutoSIPrefix(False)
 
     def _build_banner(self):
-        row = FlowLayout(hspacing=10, vspacing=6)
-        title = QtWidgets.QLabel("ESTABILIDAD DE LA ÓRBITA")
+        row = QtWidgets.QHBoxLayout()
+        row.setSpacing(8)
+        title = QtWidgets.QLabel("ESTADO")
         title.setObjectName("bannerTitle")
+        title.setToolTip("Una tarjeta por simulación, con tres cosas distintas:\n"
+                         "· Órbita: estabilidad física del movimiento (solo depende de I y Ω₀). Da el color del borde.\n"
+                         "· Esquema: qué prevé la teoría lineal del método y el Δt para el módulo y la fase.\n"
+                         "· Observado: el error medido contra la solución exacta; en ámbar si es relevante.")
         row.addWidget(title)
         self.badges, self._badge_state = [], [None] * len(DEFAULT_CONFIGS)
         for _ in DEFAULT_CONFIGS:
             b = QtWidgets.QLabel()
             b.setTextFormat(QtCore.Qt.TextFormat.RichText)
+            b.setWordWrap(True)
+            b.setMinimumWidth(150)
+            b.setSizePolicy(QtWidgets.QSizePolicy.Policy.Ignored, QtWidgets.QSizePolicy.Policy.Preferred)
             b.hide()
-            row.addWidget(b)
+            row.addWidget(b, 1)
             self.badges.append(b)
         return row
 
@@ -2359,6 +2271,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self.plot_ep.setXLink(self.plot_ew)
         zero = pg.mkPen((255, 255, 255, 70), width=1, style=QtCore.Qt.PenStyle.DotLine)
         self.err_zero = [self.plot_er.addLine(y=0, pen=zero), self.plot_ep.addLine(y=0, pen=zero)]
+        dash = pg.mkPen((255, 255, 255, 110), width=1, style=QtCore.Qt.PenStyle.DashLine)
+        self.err_floor = []
+        for p in (self.plot_er, self.plot_ep):      # por debajo de esta línea: ruido de redondeo
+            ln = pg.InfiniteLine(angle=0, pen=dash, label="ruido de redondeo",
+                                 labelOpts=dict(position=0.9, color=MUTED))
+            p.addItem(ln, ignoreBounds=True)
+            ln.setVisible(False)
+            self.err_floor.append(ln)
 
         card_w = Card("ω(t): numérica frente a la solución exacta", self.plot_ew,
                       "discontinua blanca = exacta")
@@ -2422,8 +2342,14 @@ class MainWindow(QtWidgets.QMainWindow):
         if t != t:
             self.err_readout.setText(f"<span style='color:{MUTED}'>{self.HOVER_HINT}</span>")
             return
-        parts = [f"<span style='color:{s.cfg.color}'>●</span> {s.cfg.name}: r {s.v_er[i]:+.2e} · "
-                 f"ψ {s.v_ep[i]:+.3g}°" for s, i in self._sims_at(t)]
+        def mark(v, floor):
+            return " ≈0" if abs(v) <= floor else ""
+        parts = []
+        for s, i in self._sims_at(t):
+            fl = noise_floor(i)
+            parts.append(f"<span style='color:{s.cfg.color}'>●</span> {s.cfg.name}: "
+                         f"r {s.v_er[i]:+.2e}{mark(s.v_er[i], fl)} · "
+                         f"ψ {s.v_ep[i]:+.3g}°{mark(s.v_ep[i], math.degrees(fl))}")
         self.err_readout.setText(f"<span style='font-family:{MONO}'>t = {max(t, 0):.2f} s</span> &nbsp; "
                                  + " &nbsp; ".join(parts))
 
@@ -2446,6 +2372,17 @@ class MainWindow(QtWidgets.QMainWindow):
         self.plot_ep.setLabel("left", f"|ψ| ({unit})" if log else f"ψ ({unit})", **axis_label_style())
         for z in self.err_zero:
             z.setVisible(not log)
+        self._update_error_floor()
+
+    def _update_error_floor(self):
+        log = self.chk_log_err.isChecked()
+        n = max([s.v_steps for s in self.sims if s.cfg.enabled] + [1])
+        fl = noise_floor(n)
+        seconds = self.err_unit.currentIndex() == 1
+        for ln, v, shown in ((self.err_floor[0], fl, True), (self.err_floor[1], math.degrees(fl), not seconds)):
+            ln.setVisible(log and shown)
+            if log and shown:
+                ln.setPos(math.log10(v))
 
     @staticmethod
     def _fmt_err(d, log):
@@ -2465,17 +2402,29 @@ class MainWindow(QtWidgets.QMainWindow):
         diff = [c.name for k, c in enumerate(cfgs)
                 if c.enabled and k != self.ref_index() and not self._same_exact(ref, c)]
         bad = [c.name for c in cfgs if c.enabled and not euler_matches_exact(c.I)]
+        coarse = []
+        for c in cfgs:
+            lin = self._lin(c) if c.enabled else None
+            if lin is not None and lin["beta"] * c.dt > COARSE_BETA_DT:
+                coarse.append(f"<b>{c.name}</b> ({lin['period'] / c.dt:.0f} pasos por ciclo"
+                              + (", |R| > 1: explota" if abs(lin["R"]) > 1.5 else "") + ")")
         if bad:
             self.err_notice.setText(
                 "⚠ Las ecuaciones de movimiento de <b>space_physics</b> no coinciden con "
                 "I<sub>i</sub> ω̇<sub>i</sub> = (I<sub>j</sub> − I<sub>k</sub>) ω<sub>j</sub> ω<sub>k</sub>, "
                 "que es la que resuelve la solución exacta: los errores mostrados no son fiables.")
             self.err_notice.show()
-        elif diff:
-            self.err_notice.setText(
-                f"<b>{' y '.join(diff)}</b> {'usa' if len(diff) == 1 else 'usan'} otra I u otro Ω₀: "
-                f"en la gráfica de arriba su solución exacta propia va punteada con su color; "
-                f"los errores siempre se miden frente a la exacta de cada simulación.")
+        elif diff or coarse:
+            msgs = []
+            if diff:
+                msgs.append(f"<b>{' y '.join(diff)}</b> {'usa' if len(diff) == 1 else 'usan'} otra I u otro Ω₀: "
+                            f"en la gráfica de arriba su solución exacta propia va punteada con su color; "
+                            f"los errores siempre se miden frente a la exacta de cada simulación.")
+            if coarse:
+                msgs.append("⚠ Δt demasiado grande para la dinámica (Δt·β > "
+                            f"{COARSE_BETA_DT:g}): {', '.join(coarse)}. Los errores serán grandes; "
+                            "reduce Δt o cambia de esquema.")
+            self.err_notice.setText("<br>".join(msgs))
             self.err_notice.show()
         else:
             self.err_notice.hide()
@@ -2599,9 +2548,54 @@ class MainWindow(QtWidgets.QMainWindow):
         self.rich_table = DataTable(["", "Esquema", "Δt", "p nominal", "p estimado",
                                      "error estimado", "error real"])
         self.rich_note = note("Pulsa «Calcular». Estimado: Richardson sobre el estado completo "
-                              "(ω y cuaternión). Real: ‖ω − ω exacta‖ en T con la solución analítica.")
+                              "(ω y cuaternión). Real: ‖ω − ω exacta‖ en T de la solución con 2n pasos (la que corrige Richardson).")
         self.rich_table.hide()
         rich_card = Card("Orden y error del método", body(ctl, self.rich_table, self.rich_note))
+
+        # convergencia frente a Δt: complementa a Richardson (varios Δt y solución exacta)
+        cctl = QtWidgets.QWidget()
+        ccl = QtWidgets.QHBoxLayout(cctl)
+        ccl.setContentsMargins(0, 0, 0, 0)
+        ccl.addWidget(QtWidgets.QLabel("Niveles"))
+        self.conv_levels = QtWidgets.QSpinBox()
+        self.conv_levels.setRange(3, 7)
+        self.conv_levels.setValue(5)
+        self.conv_levels.setToolTip("Δt, Δt/2, Δt/4… hasta T (el T de arriba): más niveles, más pasos")
+        ccl.addWidget(self.conv_levels)
+        btn_conv = QtWidgets.QPushButton("Calcular")
+        btn_conv.setToolTip("Error en T con Δt, Δt/2, Δt/4… para cada simulación activa, y pendiente en log-log. "
+                            "Con esquemas implícitos puede tardar unos segundos.")
+        btn_conv.clicked.connect(self.run_convergence)
+        ccl.addWidget(btn_conv)
+        ccl.addStretch(1)
+        self.plot_conv = pg.PlotWidget()
+        self._style_plot(self.plot_conv, "Δt", "error en T")
+        self.plot_conv.getAxis("bottom").enableAutoSIPrefix(False)
+        self.plot_conv.setLogMode(True, True)
+        self.plot_conv.setMinimumHeight(190)
+        self.plot_conv.addLegend(offset=(8, 8), labelTextSize="9pt")
+        self.conv_floor = pg.InfiniteLine(angle=0, pen=pg.mkPen((255, 255, 255, 110), width=1,
+                                          style=QtCore.Qt.PenStyle.DashLine),
+                                          label="ruido de redondeo", labelOpts=dict(position=0.9, color=MUTED))
+        self.plot_conv.addItem(self.conv_floor, ignoreBounds=True)
+        self.conv_floor.hide()
+        self.conv_lines, self.conv_bad, self.conv_ref = [], [], []
+        for k, cfg in enumerate(DEFAULT_CONFIGS):
+            self.conv_lines.append(self.plot_conv.plot(
+                pen=self._live_pen(k, cfg.color), symbol="o", symbolSize=7, symbolBrush=cfg.color,
+                symbolPen=cfg.color, name=cfg.name, connect="finite"))
+            self.conv_bad.append(self.plot_conv.plot(           # puntos no fiables: huecos
+                pen=None, symbol="o", symbolSize=7, symbolBrush=None, symbolPen=pg.mkPen(cfg.color, width=1.2)))
+            self.conv_ref.append(self.plot_conv.plot(
+                pen=pg.mkPen(QtGui.QColor(cfg.color).lighter(130), width=1, style=QtCore.Qt.PenStyle.DotLine)))
+        self.conv_table = DataTable(["", "Esquema", "p nominal", "p Richardson", "p observada", "pendientes locales"])
+        self.conv_table.hide()
+        self.conv_note = note("Pulsa «Calcular». Se integra hasta T con Δt, Δt/2, Δt/4… y se compara con la "
+                              "solución exacta: la pendiente en log-log es el orden p. Los puntos huecos no "
+                              "se usan en el ajuste: por debajo del ruido de redondeo (línea discontinua) o "
+                              "saturados (error comparable a ‖ω‖). La línea de puntos es la pendiente nominal.")
+        conv_card = Card("Convergencia frente a Δt", body(cctl, self.plot_conv, self.conv_table, self.conv_note),
+                         "complementa a Richardson")
 
         # equilibrios de la simulación de referencia y efecto del esquema
         self.eq_table = DataTable(["Eje", "Ω", "Tipo", "λ"])
@@ -2620,6 +2614,7 @@ class MainWindow(QtWidgets.QMainWindow):
         left.setSpacing(10)
         left.addWidget(cons_card)
         left.addWidget(rich_card)
+        left.addWidget(conv_card)
         left.addStretch(1)
         w = AdaptiveSplitter(900, sizes_h=(620, 480))
         w.addWidget(left_w)
@@ -2663,6 +2658,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.stop_T.setKeyboardTracking(False)
         self.stop_T.setToolTip("Pausa automática al llegar a este instante (0 = sin límite)")
         g.addWidget(self.stop_T, 2, 1)
+        btn_help = QtWidgets.QPushButton("?  Ayuda y atajos")
+        btn_help.setToolTip("Atajos de teclado y cómo leer los indicadores  [F1]")
+        btn_help.clicked.connect(self.show_help)
+        g.addWidget(btn_help, 3, 0, 1, 2)
         lay.addWidget(box)
         return w
 
@@ -2689,6 +2688,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.preset_note = QtWidgets.QLabel()
         self.preset_note.setObjectName("muted")
         self.preset_note.setWordWrap(True)
+        self.preset_note.setStyleSheet("padding-bottom: 5px;")   # los subíndices (I₂) bajan de la línea
         v.addWidget(self.preset_note)
         self.preset_combo.currentTextChanged.connect(
             lambda t: self.preset_note.setText(PRESET_NOTES.get(t, "")))
@@ -2953,6 +2953,8 @@ class MainWindow(QtWidgets.QMainWindow):
             panel.set_linked(not own)       # solo se desvincula quien trae otra física
         self.preset_combo.setCurrentText(name)
         self.apply_params()
+        if name in LOG_PRESETS:         # errores de órdenes de magnitud distintos: en log se ven todos
+            self.chk_log.setChecked(True)
 
     def configs(self):
         return [p.get_config() for p in self.panels]
@@ -2987,7 +2989,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self._refresh_tab_titles()
         self._update_surface_notice()
         self._update_error_notice()
+        self._clear_analysis_results()
         self._badge_state = [None] * len(self.badges)
+        for b in self.badges:               # sin esto quedarían a la vista las fichas de simulaciones ya desactivadas
+            b.hide()
         self.plot_w.setTitle(None)
         self._update_preview_items()
         if self.chk_auto.isChecked():
@@ -3011,6 +3016,19 @@ class MainWindow(QtWidgets.QMainWindow):
         if not out:
             return ""
         return " · cambió " + ("; ".join(out) if len(out) <= 3 else "varias simulaciones")
+
+    def _lin(self, cfg):
+        """linear_step_errors con caché (se consulta en cada refresco del estado)."""
+        key = (cfg.method, cfg.dt, tuple(cfg.I), tuple(cfg.w0))
+        if key not in self._lin_cache:
+            if len(self._lin_cache) > 64:
+                self._lin_cache.clear()
+            self._lin_cache[key] = linear_step_errors(cfg)
+        return self._lin_cache[key]
+
+    def _horizon_steps(self, sim):
+        """Pasos hasta el tiempo que se está mirando: el mayor entre el actual y el horizonte previsto."""
+        return max(1, int(round(max(sim.vt, self.preview_T.value()) / sim.cfg.dt)))
 
     def _on_horizon_changed(self):
         if self.chk_auto.isChecked() or self.previews:
@@ -3058,6 +3076,22 @@ class MainWindow(QtWidgets.QMainWindow):
         return row
 
     # ------------------------------------------------------------------ tiempo
+    def show_help(self):
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle("Ayuda · Janibekov Lab")
+        dlg.resize(640, 640)
+        lay = QtWidgets.QVBoxLayout(dlg)
+        view = QtWidgets.QTextBrowser()
+        view.setOpenExternalLinks(False)
+        view.setHtml(HELP_HTML.format(muted=MUTED, ok=STABILITY_COLORS["estable"], mar=STABILITY_COLORS["marginal"],
+                                      bad=STABILITY_COLORS["inestable"], g1=GRADE_COLORS[1], g2=GRADE_COLORS[2],
+                                      g0=GRADE_COLORS[0]))
+        lay.addWidget(view)
+        close = QtWidgets.QPushButton("Cerrar")
+        close.clicked.connect(dlg.accept)
+        lay.addWidget(close, alignment=QtCore.Qt.AlignmentFlag.AlignRight)
+        dlg.exec()
+
     def _pause(self, message=None):
         self.running = False
         self.btn_run.setText("▶  Iniciar")
@@ -3143,12 +3177,18 @@ class MainWindow(QtWidgets.QMainWindow):
             if sim.cfg.enabled:
                 sim.advance_to(self.clock)
         self._sync_timeline()
-        for k, sim in enumerate(self.sims):
-            if sim.cfg.enabled and sim.diverged and k not in self._div_notified:
-                self._div_notified.add(k)
-                self._pause(f"Pausa automática: {sim.cfg.name} divergió en t = {sim.t:.2f} s")
-            elif sim.cfg.enabled and sim.n_steps >= MAX_LIVE_STEPS:
+        active = [(k, s) for k, s in enumerate(self.sims) if s.cfg.enabled]
+        for k, sim in active:
+            if sim.diverged and k not in self._div_notified:
+                self._div_notified.add(k)       # se congela donde diverge; las demás siguen
+                what = (f"falló en t = {sim.t:.2f} s ({sim.error})" if sim.error
+                        else f"divergió en t = {sim.t:.2f} s")
+                self.status.showMessage(f"Divergencia: {sim.cfg.name} · {METHOD_SHORT[sim.cfg.method]} {what} "
+                                        f"(queda congelada; las demás continúan)", 12000)
+            elif sim.n_steps >= MAX_LIVE_STEPS:
                 self._pause(f"Pausa automática: {sim.cfg.name} alcanzó {MAX_LIVE_STEPS:,} pasos")
+        if active and all(s.diverged for _, s in active):
+            self._pause("Pausa automática: todas las simulaciones activas divergieron")
         if stop > 0 and self.clock >= stop - 1e-12:
             self._pause(f"Pausa automática: se alcanzó T = {stop:g} s")
         return True
@@ -3163,7 +3203,16 @@ class MainWindow(QtWidgets.QMainWindow):
             for c in self.configs():
                 if not c.enabled:
                     continue
-                r = richardson_analysis(c, T)
+                try:
+                    r = richardson_analysis(c, T)
+                except Exception as exc:
+                    rows.append([dot(c), (METHOD_SHORT[c.method], {"tip": f"{type(exc).__name__}: {exc}"}),
+                                 (f"{c.dt:g}", {"mono": True}), (f"{ORDERS[c.method]}", {"mono": True, "right": True}),
+                                 ("—", {"right": True, "color": MUTED}),
+                                 ("falló", {"right": True, "color": DataTable.ALERT}),
+                                 ("—", {"right": True, "color": MUTED})])
+                    self.status.showMessage(f"Richardson: {c.name} falló · {type(exc).__name__}: {exc}", 12000)
+                    continue
                 ok_ = np.isfinite(r["p_est"]) and np.isfinite(r["err"])
                 w = r["u_extr"][:3]
                 tip = (f"n = {r['n']} pasos · ω extrapolada = ({w[0]:+.5f}, {w[1]:+.5f}, {w[2]:+.5f})"
@@ -3181,11 +3230,77 @@ class MainWindow(QtWidgets.QMainWindow):
         self.rich_table.set_rows(rows)
         self.rich_table.setVisible(bool(rows))
         self.rich_note.setText(f"Hasta T = {T:g} s. Estimado: Richardson sobre el estado completo "
-                               f"(ω y cuaternión). Real: ‖ω − ω exacta‖ con la solución analítica."
+                               f"(ω y cuaternión). Real: ‖ω − ω exacta‖ de la solución con 2n pasos (la que corrige Richardson)."
                                if rows else "No hay simulaciones activas.")
         self.status.showMessage(
             f"Richardson hasta T = {T:g} s calculado en "
             f"{1e3 * (time.perf_counter() - t0):.0f} ms", 6000)
+
+    def run_convergence(self):
+        T, levels = self.rich_T.value(), self.conv_levels.value()
+        QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.CursorShape.WaitCursor)
+        t0 = time.perf_counter()
+        rows, floors = [], []
+        try:
+            for k, c in enumerate(self.configs()):
+                if not c.enabled:
+                    for it in (self.conv_lines[k], self.conv_bad[k], self.conv_ref[k]):
+                        it.setData([], [])
+                    continue
+                I = np.asarray(c.I, dtype=float)
+                y0 = np.array([*c.w0, 1.0, 0.0, 0.0, 0.0])
+                try:
+                    res = convergence_study(I, c.w0, lambda h, n, c=c, y0=y0, I=I: integrate(c.method, y0, h, I, n),
+                                            T, c.dt, levels)
+                except Exception as exc:
+                    for it in (self.conv_lines[k], self.conv_bad[k], self.conv_ref[k]):
+                        it.setData([], [])
+                    dash = ("—", {"right": True, "color": MUTED})
+                    rows.append([dot(c), METHOD_SHORT[c.method], (f"{ORDERS[c.method]}", {"mono": True, "right": True}),
+                                 dash, dash, (f"falló · {type(exc).__name__}: {exc}", {"color": DataTable.ALERT})])
+                    self.status.showMessage(f"Convergencia: {c.name} falló · {type(exc).__name__}: {exc}", 12000)
+                    continue
+                dts, errs, ok = res["dt"], res["err"], res["ok"]
+                good = np.isfinite(errs) & (errs > 0)
+                self.conv_lines[k].setData(dts[good & ok], errs[good & ok])
+                self.conv_bad[k].setData(dts[good & ~ok], errs[good & ~ok])
+                if ok.any():
+                    i0 = int(np.argmax(ok))
+                    self.conv_ref[k].setData(dts, errs[i0] * (dts / dts[i0]) ** ORDERS[c.method])
+                else:
+                    self.conv_ref[k].setData([], [])
+                floors.append(res["floor"])
+                try:
+                    p_rich = richardson_analysis(c, T)["p_est"]
+                except Exception:
+                    p_rich = math.nan
+                loc = " · ".join("—" if not np.isfinite(v) else f"{v:.2f}" for v in res["local"])
+                nan = ("—", {"right": True, "color": MUTED})
+                rows.append([dot(c), METHOD_SHORT[c.method], (f"{ORDERS[c.method]}", {"mono": True, "right": True}),
+                             (f"{p_rich:.2f}", {"mono": True, "right": True}) if np.isfinite(p_rich) else nan,
+                             (f"{res['p']:.2f}", {"mono": True, "right": True}) if np.isfinite(res["p"]) else nan,
+                             (loc, {"mono": True})])
+        finally:
+            QtWidgets.QApplication.restoreOverrideCursor()
+        if floors:
+            self.conv_floor.setPos(math.log10(max(floors)))
+        self.conv_floor.setVisible(bool(floors))
+        self.conv_table.set_rows(rows)
+        self.conv_table.setVisible(bool(rows))
+        self.plot_conv.autoRange()
+        if not rows:
+            self.conv_note.setText("No hay simulaciones activas.")
+        self.status.showMessage(f"Convergencia hasta T = {T:g} s calculada en "
+                                f"{1e3 * (time.perf_counter() - t0):.0f} ms", 6000)
+
+    def _clear_analysis_results(self):
+        """Los resultados de Richardson y de convergencia pertenecen a unos parámetros concretos."""
+        self.rich_table.hide()
+        self.conv_table.hide()
+        for k in range(len(self.conv_lines)):
+            for it in (self.conv_lines[k], self.conv_bad[k], self.conv_ref[k]):
+                it.setData([], [])
+        self.conv_floor.hide()
 
     def compute_preview(self):
         self.request_preview()
@@ -3220,6 +3335,12 @@ class MainWindow(QtWidgets.QMainWindow):
         note = f"✔ {self.preview_T.value():g} s calculados en {1e3 * elapsed:.0f} ms"
         if any(p["truncated"] for p in previews.values()):
             note += f" · limitada a {MAX_PREVIEW_STEPS:,} pasos"
+        failed = [self.sims[k].cfg.name for k, p in previews.items() if p.get("error") and k < len(self.sims)]
+        if failed:
+            note += f" · ⚠ error del esquema en {', '.join(failed)}"
+            self.status.showMessage("Previsualización: " + "; ".join(
+                f"{self.sims[k].cfg.name}: {p['error']}" for k, p in previews.items()
+                if p.get("error") and k < len(self.sims)), 12000)
         self._set_preview_status(note)
         self._update_preview_items()
 
@@ -3495,12 +3616,15 @@ class MainWindow(QtWidgets.QMainWindow):
                             ("separatriz o trompo", {"color": MUTED})])
                 continue
             g = d["amp"] - 1
-            if g > 1e-10:
-                txt, alert = "la amplitud crece", True
-            elif g < -1e-10:
-                txt, alert = "la amplitud decae (disipa)", False
+            n_h = max(1, int(round(self.preview_T.value() / c.dt)))
+            gr = grade(math.expm1(min(n_h * math.log(d["amp"]), 700.0)), noise_floor(n_h), TINY_R)
+            tail = " · ínfimo" if gr == 1 else ""
+            if gr == 0:
+                txt, alert = "conserva la amplitud (≈ 0)", False
+            elif g > 0:
+                txt, alert = "la amplitud crece" + tail, gr == 2
             else:
-                txt, alert = "conserva la amplitud", False
+                txt, alert = "la amplitud decae (disipa)" + tail, False
             eff.append([dot(c), METHOD_SHORT[c.method], (f"ω{'₁₂₃'[d['axis']]}", {}),
                         num(g, "{:+.2e}", alert), (txt, {"color": DataTable.ALERT if alert else TEXT})])
         self.eff_table.set_rows(eff)
@@ -3671,6 +3795,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._update_exact_curves(comp)
         if self.frame % 4 == 0 or not self.running:
             self._update_error_info()
+            self._update_error_floor()
 
     def _update_exact_curves(self, comp):
         if not self.sims:
@@ -3728,11 +3853,11 @@ class MainWindow(QtWidgets.QMainWindow):
                     c[k].setData([], [])
 
     def _update_error_info(self):
+        def tag(g):
+            return pill(GRADE_WORDS[g], GRADE_COLORS[g])
         rows = [f"<span style='color:{MUTED}'><b>Módulo r</b>: separación radial respecto a la órbita "
                 f"exacta (0 si el punto está sobre ella).<br><b>Fase ψ</b>: cuánto adelanta (+) o "
-                f"retrasa (−) respecto a la exacta <i>en el mismo instante</i>.<br>"
-                f"Los dos se separan en coordenadas polares de la órbita: ‖·‖ = módulo, ángulo = fase."
-                f"</span><br>"]
+                f"retrasa (−) respecto a la exacta <i>en el mismo instante</i>.</span><br>"]
         any_row = False
         for k, sim in enumerate(self.sims):
             c = sim.cfg
@@ -3751,34 +3876,37 @@ class MainWindow(QtWidgets.QMainWindow):
                         f"<b>{METHOD_SHORT[c.method]}</b> · Δt={c.dt:g}<br>"
                         f"<span style='color:{MUTED}'>exacta: {what}</span>")
             if sim.diverged:
-                rows.append(pill("DIVERGIÓ", STABILITY_COLORS["inestable"]))
-            elif sim.nv > 1:
+                rows.append(pill("FALLÓ" if sim.error else "DIVERGIÓ", STABILITY_COLORS["inestable"]) +
+                            f" <span style='color:{MUTED}'>en t = {sim.t:.2f} s; queda congelada"
+                            f"{' · ' + html.escape(sim.error) if sim.error else ''}</span>")
+            if sim.nv > 1:
                 r, psi, lag = sim.v_er[-1], sim.v_ep[-1], sim.v_el[-1]
-                rows.append(f"<span style='font-family:{MONO}'>ahora (t={sim.vt:.2f} s)<br>"
-                            f"&nbsp;módulo r = {r:+.3e}<br>"
-                            f"&nbsp;fase ψ = {psi:+.4g}° &nbsp;({lag:+.3e} s)</span>")
-            lin = linear_step_errors(c)
+                gr, gp = grade_pair(r, psi, sim.v_steps)
+                rows.append(f"<span style='font-family:{MONO}'>medido (t={sim.vt:.2f} s)<br>"
+                            f"&nbsp;módulo r = {r:+.3e} </span>{tag(gr)}<br>"
+                            f"<span style='font-family:{MONO}'>&nbsp;fase ψ = {psi:+.4g}° ({lag:+.3e} s) </span>{tag(gp)}")
+            lin = self._lin(c)
             if lin is None:
-                rows.append(f"<span style='color:{MUTED}'>sin centro lineal que analizar "
+                rows.append(f"<span style='color:{MUTED}'>sin teoría lineal: la órbita no rodea un centro "
                             f"(separatriz, trompo o eje intermedio)</span>")
             else:
-                dm, dp = lin["dmod"], lin["dphase"]
-                nst = sim.v_steps
-                pred_r = float(np.expm1(nst * math.log(abs(lin["R"])))) if abs(lin["R"]) > 0 else -1.0
-                pred_psi = math.degrees(dp) * nst
-                mod_v = (pill("conserva el módulo", STABILITY_COLORS["marginal"]) if abs(dm) < 1e-10 else
-                         pill("módulo crece", STABILITY_COLORS["inestable"]) if dm > 0 else
-                         pill("módulo decae", STABILITY_COLORS["estable"]))
-                pha_v = (pill("sin error de fase", STABILITY_COLORS["marginal"]) if abs(dp) < 1e-10 else
-                         pill("va por delante", STABILITY_COLORS["inestable"]) if dp > 0 else
-                         pill("va por detrás", STABILITY_COLORS["inestable"]))
-                rows.append(f"<span style='font-family:{MONO}'>por paso, esquema vs e^(iβΔt):<br>"
-                            f"&nbsp;|R|−1 = {dm:+.2e} &nbsp;{mod_v}<br>"
-                            f"&nbsp;arg R − βΔt = {dp:+.2e} rad &nbsp;{pha_v}<br>"
-                            f"teoría lineal a t={sim.vt:.2f} s: r ≈ {pred_r:+.2e}, ψ ≈ {pred_psi:+.3g}°</span>")
+                n_h = self._horizon_steps(sim)
+                (mod, gr), (pha, gp) = scheme_verdict(lin, n_h)
+                pr, pp = predicted_errors(lin, n_h)
+                o_mod, o_pha = SCHEME_ORDER[c.method]
+                rows.append(f"<span style='font-family:{MONO}'>teoría lineal (β = {lin['beta']:.4g}), por paso:<br>"
+                            f"&nbsp;módulo |R|−1 = {lin['dmod']:+.2e} → {mod}</span> {tag(gr)}<br>"
+                            f"<span style='font-family:{MONO}'>&nbsp;fase arg R − βΔt = {lin['dphase']:+.2e} rad → {pha}</span> {tag(gp)}<br>"
+                            f"<span style='font-family:{MONO}'>previsto a t = {n_h * c.dt:.4g} s: r ≈ {pr:+.2e}, ψ ≈ {pp:+.3g}°<br>"
+                            f"orden global: módulo {o_mod} · fase {o_pha}</span>")
             rows.append("")
         if not any_row:
             rows.append("Sin simulaciones activas.")
+        else:
+            rows.append(f"<span style='color:{MUTED}'><b>≈ 0</b>: por debajo del ruido de redondeo "
+                        f"(≈ 50·ε·√n; línea discontinua de las gráficas). <b>ínfimo</b>: por encima del redondeo "
+                        f"pero |r| &lt; {TINY_R:g} y |ψ| &lt; {TINY_PSI:g}°, invisible en cualquier gráfica. "
+                        f"<b>relevante</b>: a tener en cuenta.</span>")
         self.err_info.setText("<br>".join(rows))
 
     def _refresh_views(self):
@@ -3807,6 +3935,13 @@ class MainWindow(QtWidgets.QMainWindow):
                     self.curves_T[k].setData([], [])
                     self.curves_L[k].setData([], [])
             ref = self.sims[self.ref_index()] if self.sims else None
+            if ref is not None and self._w_range_key != id(ref):
+                # ω(t) nunca supera ‖ω‖máx de la órbita exacta: una simulación que explota sale del recuadro
+                # en vez de aplastar la escala (si el usuario hace zoom, no se toca hasta cambiar de problema)
+                lim = 1.15 * ref._blow / DIVERGENCE_FACTOR
+                if lim > 0:
+                    self.plot_w.setYRange(-lim, lim, padding=0)
+                self._w_range_key = id(ref)
             for k in range(3):
                 if ref is not None and ref.cfg.enabled and ref.nv > 1:
                     self.curves_w[k].setData(ref.vtimes, ref.vY[:, k])
@@ -3829,16 +3964,25 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._set_badge(k, None)
                 rows.append([dot(c), (f"{c.name} — inactiva", {"color": MUTED}), "", "", "", "", "", ""])
                 continue
-            r = regime(c.I, c.w0)
-            diverged = sim.diverged and sim.nv >= sim.n
-            if diverged:
-                obs, alert = f"divergió en t = {sim.t:.2f} s", True
-            elif sim.nv <= 1:
-                obs, alert = "aún sin simular", False
+            orbit, okind = orbit_status(c)
+            lin = self._lin(c)
+            if lin is None:
+                scheme, s_alert = "sin teoría lineal (órbita sin centro)", False
             else:
-                rel = sim.vdT[-1] / sim.T0 if sim.T0 > 0 else 0.0
-                obs, alert = f"ΔT/T₀ = {rel:+.1e} · r = {sim.v_er[-1]:.1e}", False
-            self._set_badge(k, (c.name, c.color, METHOD_SHORT[c.method], r, regime_color(r), obs, alert))
+                (mod, gr_t), (pha, gp_t) = scheme_verdict(lin, self._horizon_steps(sim))
+                tg = lambda g: " (ínfimo)" if g == 1 else ""
+                scheme, s_alert = f"módulo {mod}{tg(gr_t)} · fase {pha}{tg(gp_t)}", max(gr_t, gp_t) == 2
+            if sim.diverged and sim.nv >= sim.n:
+                obs, lvl = (f"falló en t = {sim.t:.2f} s · {sim.error}" if sim.error
+                            else f"divergió en t = {sim.t:.2f} s"), 3
+            elif sim.nv <= 1:
+                obs, lvl = "aún sin simular", 0
+            else:
+                r_, p_ = sim.v_er[-1], sim.v_ep[-1]
+                lvl = max(grade_pair(r_, p_, sim.v_steps))
+                obs = f"r {r_:+.1e} · ψ {p_:+.1e}° · {GRADE_WORDS[lvl]}"
+            self._set_badge(k, (c.name, c.color, METHOD_SHORT[c.method], orbit,
+                                STABILITY_COLORS[okind], scheme, s_alert, obs, lvl))
             if show_detail:
                 rows.append([dot(c), METHOD_SHORT[c.method], (f"{c.dt:g}", {"mono": True, "right": True}),
                              num(sim.vt, "{:.2f}"), num(sim.vdT[-1]), num(sim.vdL[-1]),
@@ -3847,7 +3991,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._set_badge(k, None)
         if show_detail:
             self.cons_table.set_rows(rows)
-        if not self.status.currentMessage().startswith(("Previsualización", "Parámetros", "Richardson", "Pausa automática")):
+        if not self.status.currentMessage().startswith(("Previsualización", "Parámetros", "Richardson", "Convergencia", "Pausa automática", "Divergencia")):
             self.status.showMessage(
                 f"{'▶ en ejecución' if self.running else '⏸ en pausa'}   ·   reloj = {self.clock:.2f} s"
                 f"   ·   [Espacio] iniciar/pausar  [R] reiniciar  [P] recalcular previsualización"
@@ -3862,12 +4006,15 @@ class MainWindow(QtWidgets.QMainWindow):
         if state is None:
             b.hide()
             return
-        name, color, method, pred, col, obs, alert = state
-        obs_html = (f"<span style='color:#FFD740'>{obs}</span>" if alert
-                    else f"<span style='color:#d3d6db'>{obs}</span>")
+        name, color, method, orbit, col, scheme, s_alert, obs, lvl = state
+        amber, neutral = "#FFD740", "#d3d6db"
+        sch_html = f"<span style='color:{amber if s_alert else neutral}'>{scheme}</span>"
+        obs_html = f"<span style='color:{amber if lvl >= 2 else neutral}'>{obs}</span>"
+        lab = lambda t: f"<span style='color:{MUTED}'>{t}</span>"
         b.setText(f"<span style='color:{color}'>●</span>&nbsp;<b>{name} · {method}</b><br>"
-                  f"<span style='font-weight:400; font-size:12px'>predicho: <b>{pred.upper()}</b></span><br>"
-                  f"<span style='font-weight:400; font-size:11px'>observado: {obs_html}</span>")
+                  f"<span style='font-weight:400; font-size:11px'>{lab('Órbita')} {orbit}<br>"
+                  f"{lab('Esquema')} {sch_html}<br>"
+                  f"{lab('Observado')} {obs_html}</span>")
         if prev is None or prev[4] != col:
             b.setStyleSheet(badge_css(col, 13))
         b.show()

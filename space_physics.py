@@ -1,6 +1,6 @@
-"""Definición analítica de las ecuaciones del problema,
-cómputo de la matriz Jacobiana exacta y
-verificación de los invariantes 2T y L2."""
+"""Definición analítica de las ecuaciones del problema, matriz Jacobiana exacta, invariantes 2T y L²,
+geometría del espacio de fases, solución exacta de Euler (funciones elípticas de Jacobi) y
+herramientas para medir el error de los esquemas numéricos frente a ella."""
 
 import sympy as sp
 import numpy as np
@@ -62,10 +62,177 @@ def kinetic_energy(omega, I):
 def angular_momentum_sq(omega, I):
     return np.sum((np.array(I) * np.asarray(omega)) ** 2, axis=-1)
 
-# ================== Solución exacta del problema ==================
-# Solución exacta de las ecuaciones de Euler (sólido libre) y error de módulo y fase.
+# ---------------------------------------------------------------- ampliación: solución exacta, esquemas y error
+# Geometría del espacio de fases, solución exacta de Euler (Jacobi), análisis lineal de los
+# esquemas, relevancia del error y estudio de convergencia.
+
+
+# ---------------------------------------------------------------- geometría del espacio de fases
+
+
+def sorted_axes(I):
+    a, b, c = np.argsort(np.asarray(I, dtype=float))
+    return int(a), int(b), int(c)
+
+
+def is_degenerate(I, tol=1e-6):
+    Is = np.sort(np.asarray(I, dtype=float))
+    return (Is[1] - Is[0] < tol) or (Is[2] - Is[1] < tol)
+
+
+def poinsot_semiaxes(I, w0):
+    I = np.asarray(I, dtype=float)
+    twoT = 2 * kinetic_energy(w0, I)
+    L = np.sqrt(angular_momentum_sq(w0, I))
+    return np.sqrt(twoT / I), L / I
+
+
+def regime(I, w0):
+    if is_degenerate(I):
+        return "trompo simétrico"
+    I = np.asarray(I, dtype=float)
+    _, b, _ = sorted_axes(I)
+    twoT = 2 * kinetic_energy(w0, I)
+    L2 = angular_momentum_sq(w0, I)
+    D = L2 - twoT * I[b]
+    if abs(D) < 1e-3 * twoT * I[b]:
+        return "≈ separatriz (inestable)"
+    return "precesa eje mayor (estable)" if D > 0 else "precesa eje menor (estable)"
+
+
+def surrounded_axis(I, w0):
+    if is_degenerate(I):
+        return None
+    I = np.asarray(I, dtype=float)
+    a, b, c = sorted_axes(I)
+    twoT = 2 * kinetic_energy(w0, I)
+    D = angular_momentum_sq(w0, I) - twoT * I[b]
+    if abs(D) < 1e-3 * twoT * I[b]:
+        return None
+    return c if D > 0 else a
+
+
+def separatrix_curves(I, twoT, n_pts=300):
+    if is_degenerate(I) or twoT <= 0:
+        return []
+    I = np.asarray(I, dtype=float)
+    a, b, c = sorted_axes(I)
+    Ia, Ib, Ic = I[a], I[b], I[c]
+    k = math.sqrt(Ia * (Ib - Ia) / (Ic * (Ic - Ib)))
+    s = np.linspace(0, 2 * np.pi, n_pts)
+    A = math.sqrt(twoT / (Ia + Ic * k * k))
+    B = math.sqrt(twoT / Ib)
+    curves = []
+    for sign in (+1, -1):
+        P = np.zeros((n_pts, 3))
+        P[:, a] = A * np.cos(s)
+        P[:, b] = B * np.sin(s)
+        P[:, c] = sign * k * A * np.cos(s)
+        curves.append(P)
+    return curves
+
+
+def polhode_family(I, twoT, n_levels=5, n_pts=200):
+    if is_degenerate(I) or twoT <= 0:
+        return []
+    I = np.asarray(I, dtype=float)
+    a, b, c = sorted_axes(I)
+    Ia, Ib, Ic = I[a], I[b], I[c]
+    s = np.linspace(0, 2 * np.pi, n_pts)
+    curves = []
+    levels = np.linspace(0.15, 0.9, n_levels)
+
+    for f in levels:
+        L2 = twoT * (Ia + f * (Ib - Ia))
+        wc = math.sqrt((L2 - twoT * Ia) / (Ic * (Ic - Ia))) * np.cos(s)
+        wb = math.sqrt((L2 - twoT * Ia) / (Ib * (Ib - Ia))) * np.sin(s)
+        wa = np.sqrt(np.maximum(twoT - Ib * wb ** 2 - Ic * wc ** 2, 0) / Ia)
+        for sign in (+1, -1):
+            P = np.zeros((n_pts, 3))
+            P[:, a], P[:, b], P[:, c] = sign * wa, wb, wc
+            curves.append(P)
+
+    for f in levels:
+        L2 = twoT * (Ic - f * (Ic - Ib))
+        wa = math.sqrt((twoT * Ic - L2) / (Ia * (Ic - Ia))) * np.cos(s)
+        wb = math.sqrt((twoT * Ic - L2) / (Ib * (Ic - Ib))) * np.sin(s)
+        wc = np.sqrt(np.maximum(twoT - Ia * wa ** 2 - Ib * wb ** 2, 0) / Ic)
+        for sign in (+1, -1):
+            P = np.zeros((n_pts, 3))
+            P[:, a], P[:, b], P[:, c] = wa, wb, sign * wc
+            curves.append(P)
+    return curves
+
+
+def chart_axes(k):
+    return (k + 1) % 3, (k + 2) % 3
+
+
+def reduced_flow(I, twoT, k, sign, X, Y):
+    I = np.asarray(I, dtype=float)
+    i, j = chart_axes(k)
+    X, Y = np.asarray(X, dtype=float), np.asarray(Y, dtype=float)
+    W = np.zeros((3,) + X.shape)
+    W[i], W[j] = X, Y
+    W[k] = sign * np.sqrt(np.maximum(twoT - I[i] * X ** 2 - I[j] * Y ** 2, 0) / I[k])
+    dW = euler_equations(W, np.diag(I))
+    return dW[i], dW[j]
+
+
+def phase_plane_orbits(I, twoT, k, n_levels=9, n_pts=400):
+    if is_degenerate(I) or twoT <= 0:
+        return [], []
+    I = np.asarray(I, dtype=float)
+    i, j = chart_axes(k)
+    a, b = I[i] * (I[i] - I[k]), I[j] * (I[j] - I[k])
+    fr = np.linspace(0.12, 1.0, n_levels) ** 2
+    qa, qb = a * twoT / I[i], b * twoT / I[j]
+    if a * b > 0:
+        levels = fr * (qa if abs(qa) > abs(qb) else qb)
+        seps = []
+    else:
+        levels = np.concatenate([fr * qa, fr * qb])
+        seps = chart_level_curve(I, twoT, k, 0.0, n_pts)
+    orbits = [P for c in levels for P in chart_level_curve(I, twoT, k, c, n_pts)]
+    return orbits, seps
+
+
+def chart_level_curve(I, twoT, k, c, n_pts=400):
+    I = np.asarray(I, dtype=float)
+    i, j = chart_axes(k)
+    a, b = I[i] * (I[i] - I[k]), I[j] * (I[j] - I[k])
+    xm, ym = math.sqrt(twoT / I[i]), math.sqrt(twoT / I[j])
+
+    def clip(x, y):
+        P = np.column_stack([x, y]).astype(float)
+        P[I[i] * P[:, 0] ** 2 + I[j] * P[:, 1] ** 2 > twoT * (1 + 1e-9)] = np.nan
+        return P
+
+    if a * b > 0:
+        if c / a <= 0:
+            return []
+        s = np.linspace(0, 2 * np.pi, n_pts)
+        return [clip(math.sqrt(c / a) * np.cos(s), math.sqrt(c / b) * np.sin(s))]
+
+    swap = a < 0
+    A, B, XM, YM = (b, a, ym, xm) if swap else (a, b, xm, ym)
+    if c > 0:
+        r, q = math.sqrt(c / A), math.sqrt(c / -B)
+        s = np.linspace(-1, 1, n_pts) * math.asinh(YM / q)
+        raw = [(sg * r * np.cosh(s), q * np.sinh(s)) for sg in (1, -1)]
+    elif c < 0:
+        r, q = math.sqrt(c / B), math.sqrt(-c / A)
+        s = np.linspace(-1, 1, n_pts) * math.asinh(XM / q)
+        raw = [(q * np.sinh(s), sg * r * np.cosh(s)) for sg in (1, -1)]
+    else:
+        m = math.sqrt(A / -B)
+        u = np.linspace(-XM, XM, n_pts)
+        raw = [(u, m * u), (u, -m * u)]
+    return [clip(v, u) if swap else clip(u, v) for u, v in raw]
+
 
 SEP_M = 1.0 - 1e-13          # a partir de aquí m = 1: límite hiperbólico (separatriz)
+
 
 @lru_cache(maxsize=64)
 def _agm(m):
@@ -128,7 +295,7 @@ class EulerExact:
         wdot = np.asarray(euler_equations(w0, np.diag(I)), dtype=float).reshape(3)
         if np.linalg.norm(wdot) <= 1e-9 * (w0 @ w0):        # reposo, esfera, eje principal, ω ⟂ eje del trompo
             return
-        a, b, c = (int(k) for k in np.argsort(I))
+        a, b, c = sorted_axes(I)
         tol = 1e-9 * I[c]
         if I[b] - I[a] < tol or I[c] - I[b] < tol:            # trompo simétrico: p = eje distinto
             self.kind = "trompo"
@@ -214,3 +381,129 @@ def euler_matches_exact(I):
     ws = np.random.default_rng(1).normal(size=(3, 3))
     return all(np.allclose(np.reshape(euler_equations(w, np.diag(I)), 3), std(w), rtol=1e-8, atol=1e-10)
                for w in ws)
+
+
+# ---------------------------------------------------------------- análisis lineal de un esquema
+
+
+def equilibrium_diagnosis(I, w0, amplification, dt):
+    """Equilibrios del cuerpo, eje que rodea la órbita y factor de amplificación |R(iβΔt)| por paso del
+    esquema (amplification = su función de amplificación R(z)) en ese centro; amp = None si no hay centro."""
+    I, w0 = np.asarray(I, dtype=float), np.asarray(w0, dtype=float)
+    twoT = 2 * float(kinetic_energy(w0, I))
+    eqs = equilibrium_analysis(I, twoT)
+    axis = surrounded_axis(I, w0)
+    amp = None
+    if axis is not None and eqs[axis]["type"] == "centro":
+        beta = float(np.max(np.abs(eqs[axis]["eigvals"].imag)))
+        amp = abs(amplification(1j * beta * dt))
+    return {"eqs": eqs, "axis": axis, "amp": amp}
+
+
+def linear_step_errors(I, w0, amplification, dt):
+    """Error por paso del esquema frente a la solución exacta e^{z} en el centro que rodea la
+    órbita (pequeñas oscilaciones): módulo |R(iβΔt)| − 1 y fase arg R − βΔt. None si no hay centro."""
+    I, w0 = np.asarray(I, dtype=float), np.asarray(w0, dtype=float)
+    axis = surrounded_axis(I, w0)
+    if axis is None:
+        return None
+    twoT = 2 * float(kinetic_energy(w0, I))
+    e = equilibrium_analysis(I, twoT)[axis]
+    if e["type"] != "centro":
+        return None
+    beta = float(np.max(np.abs(e["eigvals"].imag)))
+    if beta <= 0:
+        return None
+    R = complex(amplification(1j * beta * dt))
+    return {"axis": axis, "beta": beta, "R": R, "dmod": abs(R) - 1.0,
+            "dphase": float(np.angle(R) - beta * dt), "period": 2 * math.pi / beta}
+
+
+
+# ---------------------------------------------------------------- ¿cuándo un error es relevante?
+
+
+EPS = float(np.finfo(float).eps)
+TINY_R, TINY_PSI = 1e-6, 1e-3    # por debajo: invisible en cualquier gráfica (módulo adimensional, fase en °)
+
+
+def noise_floor(n_steps):
+    """Error de módulo por debajo del cual no se distingue del redondeo acumulado tras n pasos."""
+    return 50.0 * EPS * math.sqrt(max(n_steps, 1))
+
+
+def grade(x, floor, tiny):
+    """0: ≤ ruido de redondeo · 1: ínfimo (invisible) · 2: a tener en cuenta."""
+    ax = abs(x)
+    return 0 if ax <= floor else (1 if ax < tiny else 2)
+
+
+def grade_pair(r, psi, n):
+    """Gravedad del error de módulo r y de fase psi (°) tras n pasos."""
+    fl = noise_floor(n)
+    return grade(r, fl, TINY_R), grade(psi, math.degrees(fl), TINY_PSI)
+
+
+def predicted_errors(lin, n):
+    """(r, psi en °) previstos por la teoría lineal tras n pasos."""
+    R = abs(lin["R"])
+    r = math.expm1(min(n * math.log(R), 700.0)) if R > 0 else -1.0
+    return r, math.degrees(lin["dphase"]) * n
+
+
+
+# ---------------------------------------------------------------- comparación de problemas
+
+
+SURFACE_TOL = 1e-3
+
+
+def surface_mismatch(ref_cfg, cfg, tol=SURFACE_TOL):
+    """None si la trayectoria de cfg yace (a tol) sobre las superficies de ref_cfg
+    (elipsoides de energía y momento); si no, dict(same_I, dT, dL) con las diferencias
+    relativas de energía y de ‖L‖²."""
+    Ir, Ic = np.asarray(ref_cfg.I, dtype=float), np.asarray(cfg.I, dtype=float)
+    Tr, Tc = float(kinetic_energy(ref_cfg.w0, Ir)), float(kinetic_energy(cfg.w0, Ic))
+    Lr, Lc = (float(angular_momentum_sq(ref_cfg.w0, Ir)),
+              float(angular_momentum_sq(cfg.w0, Ic)))
+
+    def rel(a, b):
+        return (b / a - 1.0) if a > 0 else (0.0 if b == 0 else math.inf)
+
+    same_I = bool(np.allclose(Ir, Ic, rtol=1e-9, atol=1e-12))
+    dT, dL = rel(Tr, Tc), rel(Lr, Lc)
+    if same_I and abs(dT) <= tol and abs(dL) <= tol:
+        return None
+    return {"same_I": same_I, "dT": dT, "dL": dL}
+
+
+# ---------------------------------------------------------------- convergencia frente a Δt
+def convergence_study(I, w0, integrate, T, dt, levels=5):
+    """Error en T frente a Δt: ‖ω_num(T) − ω_exacta(T)‖ con Δt₀, Δt₀/2, Δt₀/4, … (Δt₀ = T/round(T/dt)).
+
+    integrate(h, n) debe devolver la trayectoria (n+1, ≥3) con ω en las tres primeras columnas, partiendo
+    de ω(0) = w0 con paso h. Complementa a Richardson: éste da un orden local con tres pasos y no necesita
+    la solución exacta; aquí se usa la exacta y varios Δt, y se ve dónde el error deja de ser fiable.
+
+    Un punto es fiable si es finito, está por encima del ruido de redondeo y no está saturado (error
+    comparable a ‖ω‖). El orden observado p es la pendiente del ajuste en log-log de los fiables."""
+    I, w0 = np.asarray(I, dtype=float), np.asarray(w0, dtype=float)
+    w_ex = EulerExact(I, w0).omega(np.array([float(T)]))[0]
+    n0 = max(1, int(round(T / dt)))
+    scale = max(float(np.linalg.norm(w0)), 1e-300)
+    dts, errs = [], []
+    for k in range(levels):
+        n, h = n0 * 2 ** k, T / (n0 * 2 ** k)
+        with np.errstate(all="ignore"):
+            Y = np.asarray(integrate(h, n), dtype=float)
+            e = float(np.linalg.norm(Y[-1, :3] - w_ex)) if np.isfinite(Y[-1, :3]).all() else math.nan
+        dts.append(h)
+        errs.append(e)
+    dts, errs = np.array(dts), np.array(errs)
+    floor = noise_floor(n0 * 2 ** (levels - 1)) * scale
+    with np.errstate(invalid="ignore"):
+        ok = np.isfinite(errs) & (errs > floor) & (errs < 0.1 * scale)
+    p = float(np.polyfit(np.log(dts[ok]), np.log(errs[ok]), 1)[0]) if ok.sum() >= 2 else math.nan
+    local = [math.log(errs[k + 1] / errs[k]) / math.log(dts[k + 1] / dts[k])
+             if ok[k] and ok[k + 1] else math.nan for k in range(levels - 1)]
+    return {"dt": dts, "err": errs, "floor": floor, "ok": ok, "p": p, "local": np.array(local), "n0": n0}
