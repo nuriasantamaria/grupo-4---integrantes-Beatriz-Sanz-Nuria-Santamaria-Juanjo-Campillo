@@ -72,11 +72,27 @@ def scheme_order(scheme, f, u0, T, N):
     return np.log2(norm(u1 - u2) / norm(u2 - u3))
 
 
-def richardson_error(scheme, f, u0, T, N, p):
-    u_coarse = final_state(scheme, f, u0, T, N)
-    u_fine = final_state(scheme, f, u0, T, 2*N)
-    return norm(u_fine - u_coarse) / (2**p - 1)
+def richardson_error(scheme, f, u0, T, N, p, t0=0):
+    # E(t_n) en los N+1 instantes de la malla gruesa; u_fine[0::2] son esos mismos instantes
+    u_coarse = cauchy_problem(f, u0, np.linspace(t0, t0 + T, N + 1), scheme)
+    u_fine = cauchy_problem(f, u0, np.linspace(t0, t0 + T, 2*N + 1), scheme)
+    return (u_fine[0::2, :] - u_coarse) / (2**p - 1)
 
+def convergence_rate(scheme, f, u0, T, N, m, components=slice(None)):
+    # ‖u_2N − u_N‖ en T con N, 2N, 4N, ...: en log-log es una recta de pendiente −p
+    log_N, log_E = np.zeros(m), np.zeros(m)
+    u1 = final_state(scheme, f, u0, T, N)
+    for i in range(m):
+        N = 2*N
+        u2 = final_state(scheme, f, u0, T, N)
+        log_N[i] = np.log10(N)
+        log_E[i] = np.log10(norm((u2 - u1)[components]))
+        u1 = u2
+    ok = np.isfinite(log_E)    # fuera los NaN (divergencia) y los −inf (diferencia nula)
+    p = -np.polyfit(log_N[ok], log_E[ok], 1)[0] if ok.sum() >= 2 else np.nan
+    return log_N, log_E, p
+
+# no lo pide el enunciado PEI1. Obtiene una estimación mejor a partir de la estimación del error
 def richardson_extrapolation(scheme, f, u0, T, N, p):
     w_coarse = final_state(scheme, f, u0, T, N)
     w_fine = final_state(scheme, f, u0, T, 2*N)

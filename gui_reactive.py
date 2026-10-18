@@ -113,15 +113,17 @@ def richardson_analysis(cfg, T):
     p = ORDERS[cfg.method]
     with np.errstate(all="ignore"):
         p_est = ne.scheme_order(scheme, f, u0, T, n)
-        err = ne.richardson_error(scheme, f, u0, T, n, p)
+        E = ne.richardson_error(scheme, f, u0, T, n, p)
+        err = np.linalg.norm(E[-1])                      # error en T (estado completo)
         u_extr = ne.richardson_extrapolation(scheme, f, u0, T, n, p)
+        p_conv = ne.convergence_rate(scheme, f, u0, T, n, 3, slice(0, 3))[2]    # n … 8n pasos, solo ω
     # error real de ω en T frente a la exacta, de la solución fina (2n pasos): es la que Richardson estima y corrige
     with np.errstate(all="ignore"):
         Y = integrate(cfg.method, u0, T / (2 * n), np.asarray(cfg.I, dtype=float), 2 * n)
         w_ex = EulerExact(cfg.I, cfg.w0).omega(np.array([float(T)]))[0]
         err_real = float(np.linalg.norm(Y[-1, :3] - w_ex))
     return {"n": n, "p": p, "p_est": float(p_est), "err": float(err), "u_extr": u_extr,
-            "err_real": err_real}
+            "err_real": err_real, "p_conv": float(p_conv)}
 
 
 # --- ¿cuándo un error es relevante? Se compara con el ruido de redondeo y con lo visible en pantalla
@@ -2541,11 +2543,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.rich_T.setSuffix(" s")
         cl.addWidget(self.rich_T)
         btn_rich = QtWidgets.QPushButton("Calcular")
-        btn_rich.setToolTip("Integra con n, 2n y 4n pasos hasta T (n = T/Δt) para cada simulación activa")
+        btn_rich.setToolTip("Integra con n, 2n, 4n y 8n pasos hasta T (n = T/Δt) para cada simulación activa")
         btn_rich.clicked.connect(self.run_richardson)
         cl.addWidget(btn_rich)
         cl.addStretch(1)
-        self.rich_table = DataTable(["", "Esquema", "Δt", "p nominal", "p estimado",
+        self.rich_table = DataTable(["", "Esquema", "Δt", "p nominal", "p estimado", "p log-log",
                                      "error estimado", "error real"])
         self.rich_note = note("Pulsa «Calcular». Estimado: Richardson sobre el estado completo "
                               "(ω y cuaternión). Real: ‖ω − ω exacta‖ en T de la solución con 2n pasos (la que corrige Richardson).")
@@ -3208,7 +3210,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 except Exception as exc:
                     rows.append([dot(c), (METHOD_SHORT[c.method], {"tip": f"{type(exc).__name__}: {exc}"}),
                                  (f"{c.dt:g}", {"mono": True}), (f"{ORDERS[c.method]}", {"mono": True, "right": True}),
-                                 ("—", {"right": True, "color": MUTED}),
+                                 ("—", {"right": True, "color": MUTED}), ("—", {"right": True, "color": MUTED}),
                                  ("falló", {"right": True, "color": DataTable.ALERT}),
                                  ("—", {"right": True, "color": MUTED})])
                     self.status.showMessage(f"Richardson: {c.name} falló · {type(exc).__name__}: {exc}", 12000)
@@ -3220,6 +3222,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 rows.append([dot(c), (f"{METHOD_SHORT[c.method]}", {"tip": tip}), (f"{c.dt:g}", {"mono": True}),
                              (f"{r['p']}", {"mono": True, "right": True}),
                              (f"{r['p_est']:.2f}", {"mono": True, "right": True}) if ok_
+                             else ("—", {"right": True, "color": MUTED}),
+                             (f"{r['p_conv']:.2f}", {"mono": True, "right": True}) if np.isfinite(r["p_conv"])
                              else ("—", {"right": True, "color": MUTED}),
                              (f"{r['err']:.2e}", {"mono": True, "right": True}) if ok_
                              else ("divergió", {"right": True, "color": DataTable.ALERT}),

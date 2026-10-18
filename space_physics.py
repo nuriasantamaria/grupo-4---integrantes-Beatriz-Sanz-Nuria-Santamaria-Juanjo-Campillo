@@ -2,7 +2,7 @@
 geometría del espacio de fases, solución exacta de Euler (funciones elípticas de Jacobi) y
 herramientas para medir el error de los esquemas numéricos frente a ella."""
 
-import sympy as sp
+
 import numpy as np
 import math
 from functools import lru_cache
