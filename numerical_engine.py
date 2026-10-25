@@ -6,31 +6,49 @@ Convenio: f(u, t) es el campo y scheme(f, u, delta, t) avanza un paso de tamaño
 
 import numpy as np
 from numpy.linalg import norm
+from collections import namedtuple
 
 
 def euler(f, u, delta, t):
     return u + delta * f(u, t)
 
-def implicit_euler(f, u, delta, t, tol=1e-12, max_iter=100):
-    Y = u + delta * f(u, t)
-    for _ in range(max_iter):
-        Y_new = u + delta * f(Y, t + delta)
-        R = Y_new - Y
-        Y = Y_new
-        if not norm(R) > tol:
-            break
-    return Y
 
-def crank_nicolson(f, u, delta, t, tol=1e-12, max_iter=100):
-    fn = f(u, t)
-    Y = u + delta * fn
+def _fixed_point(G, Y, tol, max_iter):
     for _ in range(max_iter):
-        Y_new = u + delta * (fn + f(Y, t + delta)) / 2
-        R = Y_new - Y
+        Y_new = G(Y)
+        R = norm(Y_new - Y)
+        if not np.isfinite(R):
+            raise ArithmeticError("la iteración de punto fijo diverge (NaN/inf)")
         Y = Y_new
-        if not norm(R) > tol:
-            break
-    return Y
+        if R <= tol:
+            return Y
+    raise RuntimeError(f"punto fijo sin converger en {max_iter} iteraciones (|R| = {R:.1e})")
+
+
+def my_jacobian(F, Y, eps=1e-7):
+    F0, J = F(Y), np.empty((Y.size, Y.size))
+    for j in range(Y.size):
+        h = eps * max(1.0, abs(Y[j]))
+        Yh = Y.copy(); Yh[j] += h
+        J[:, j] = (F(Yh) - F0) / h
+    return J
+
+def my_newton(F, Y, tol, max_iter):
+    for _ in range(max_iter):
+        dY = np.linalg.solve(my_jacobian(F, Y), -F(Y))
+        Y = Y + dY
+        if not np.all(np.isfinite(Y)):
+            raise ArithmeticError("Newton diverge (NaN/inf)")
+        if norm(dY) <= tol * max(1.0, norm(Y)):
+            return Y
+    raise RuntimeError(f"Newton sin converger en {max_iter} iteraciones")
+
+def implicit_euler(f, u, delta, t, tol=1e-12, max_iter=20):
+    return my_newton(lambda Y: Y - u - delta * f(Y, t + delta), u + delta * f(u, t), tol, max_iter)
+
+def crank_nicolson(f, u, delta, t, tol=1e-12, max_iter=20):
+    fn = f(u, t)
+    return my_newton(lambda Y: Y - u - delta * (fn + f(Y, t + delta)) / 2, u + delta * fn, tol, max_iter)
 
 def runge_kutta_4(f, u, delta, t):
     k1=f(u, t)
@@ -51,22 +69,23 @@ def amplification_crank_nicolson(z):
 def amplification_runge_kutta_4(z):
     return 1 + z + z**2/2 + z**3/6 + z**4/24
 
-def jacobian(f, u, t=0, h=1e-6):
-    # diferencias centradas: columna j = (f(u + h e_j) − f(u − h e_j)) / 2h, error O(h²)
-    u = np.asarray(u, dtype=float)
-    J = np.zeros((u.size, u.size))
-    for j in range(u.size):
-        e = np.zeros(u.size)
-        e[j] = h
-        J[:, j] = (f(u + e, t) - f(u - e, t)) / (2*h)
-    return J
+def stability_grid(amplification, re=(-4.0, 2.0), im=(-3.5, 3.5), n=301):
+    x, y = np.linspace(*re, n), np.linspace(*im, n)
+    with np.errstate(all="ignore"):
+        A = np.abs(amplification(x[:, None] + 1j * y[None, :]))
+    return x, y, np.nan_to_num(A, nan=np.inf)
 
-def stability_region(amplification, re=(-4, 2), im=(-3, 3), n=400):
-    # malla del plano z = λΔt; la región de estabilidad absoluta es donde |R(z)| ≤ 1
-    x, y = np.meshgrid(np.linspace(*re, n), np.linspace(*im, n))
-    with np.errstate(divide='ignore', invalid='ignore'):    # polos de R (z=1, z=2 en implícitos)
-        R = np.abs(amplification(x + 1j*y))
-    return x, y, R <= 1
+
+
+Scheme = namedtuple("Scheme", "step amplification order")
+
+SCHEMES = {
+    "euler": Scheme(euler,          amplification_euler,          1),
+    "be":    Scheme(implicit_euler, amplification_implicit_euler, 1),
+    "cn":    Scheme(crank_nicolson, amplification_crank_nicolson, 2),
+    "rk4":   Scheme(runge_kutta_4,  amplification_runge_kutta_4,  4),
+}
+
 
 def cauchy_problem(f, u0, t, scheme):
     u0 = np.asarray(u0, dtype=float)

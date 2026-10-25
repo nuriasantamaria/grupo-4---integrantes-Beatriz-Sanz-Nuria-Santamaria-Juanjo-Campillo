@@ -1,47 +1,38 @@
+"""Pruebas de Richardson sobre y' = -y (solución exacta e^-t).
+Se puede ejecutar con `python test_richardson.py` o con pytest."""
 import numpy as np
-from numerical_engine import runge_kutta_4, integration_final_state, richardson_error, scheme_order
-from numerical_engine import richardson_extrapolation
-from functools import partial
-from space_physics import euler_equations
 
-f_test = lambda u: -u
-#traj = runge_kutta_4(f_test, [1.0], delta=0.1, N=10)
-#print(traj[-1, 0], np.exp(-1.0))
+from numerical_engine import (runge_kutta_4, final_state, richardson_error,
+                              richardson_extrapolation, scheme_order)
 
-#for n in [10, 20, 40, 80]:
+f_test = lambda u, t: -u
+EXACTA = np.exp(-1.0)
 
-#    traj = runge_kutta_4(f_test, [1.0], delta=1/n, N=n)
-#    error = abs(traj[-1, 0] - np.exp(-1.0))
-#   print(n, error)
 
-#w = integration_final_state(runge_kutta_4, f_test, [1.0], T=1.0, n=10)
-#print(w, np.exp(-1.0))
+def test_orden_de_rk4():
+    assert abs(scheme_order(runge_kutta_4, f_test, [1.0], 1.0, 20) - 4) < 0.2
 
-#est = richardson_error(runge_kutta_4, f_test, [1.0], T=1.0, n=10, p=4)
-#real = abs(integration_final_state(runge_kutta_4, f_test, [1.0], T=1.0, n=20) - np.exp(-1.0))
-#print(est, real)
 
-#print(scheme_order(runge_kutta_4, f_test, [1.0], T=1.0, n=100))
+def test_richardson_estima_el_error_de_la_solucion_fina():
+    n = 10
+    real = abs(final_state(runge_kutta_4, f_test, [1.0], 1.0, 2 * n)[0] - EXACTA)
+    est = float(np.linalg.norm(richardson_error(runge_kutta_4, f_test, [1.0], 1.0, n, p=4)[-1]))   # error en T
+    assert 0.5 < est / real < 2.0, f"estimado {est:.2e}, real {real:.2e}"
 
-#traj = runge_kutta_4(f, [1,0.01,0.01], delta=0.1, N=10)
-#est = richardson_error(runge_kutta_4, f, [0.01,1,0.01], T=1.0, n=10, p=4)
-#print(est)
 
-#I = np.diag([1.0, 2.0, 3.0])
-#f = partial(euler_equations, I=I)
+def test_la_extrapolacion_mejora_y_converge_con_mayor_orden():
+    previo = None
+    for n in (5, 10, 20, 40):
+        fino = abs(final_state(runge_kutta_4, f_test, [1.0], 1.0, 2 * n)[0] - EXACTA)
+        extr = abs(richardson_extrapolation(runge_kutta_4, f_test, [1.0], 1.0, n, p=4)[0] - EXACTA)
+        assert extr < fino, f"n = {n}: la extrapolación no mejora ({extr:.2e} ≥ {fino:.2e})"
+        if previo is not None:
+            assert extr < previo / 16, f"n = {n}: el error extrapolado no baja al menos como Δt⁴"
+        previo = extr
 
-#u0 = [0.1, 1.0, 0.1]
-#print (scheme_order(runge_kutta_4, f, u0, T=10, n=800))
 
-exacta = np.exp(-1.0); n=10
-w_coarse = integration_final_state(runge_kutta_4, f_test, [1.0], 1.0, n)
-w_fine = integration_final_state(runge_kutta_4, f_test, [1.0], 1.0, 2*n)
-w_extrap = richardson_extrapolation(runge_kutta_4, f_test, [1.0], 1.0, n, p=4)
-
-print("error n=10 :", abs(w_coarse - exacta))
-print("error n=20 :", abs(w_fine - exacta))
-print("error extrap :", abs(w_extrap - exacta))
-
-for n in [5, 10, 20, 40]:
-    w = richardson_extrapolation(runge_kutta_4, f_test, [1.0], 1.0, n, p=4)
-    print(n, abs(w[0] - exacta))
+if __name__ == "__main__":
+    for nombre, fn in sorted(globals().items()):
+        if nombre.startswith("test_") and callable(fn):
+            fn()
+            print("✔", nombre[5:].replace("_", " "))
