@@ -16,7 +16,7 @@ def test_orden_de_rk4():
 def test_richardson_estima_el_error_de_la_solucion_fina():
     n = 10
     real = abs(final_state(runge_kutta_4, f_test, [1.0], 1.0, 2 * n)[0] - EXACTA)
-    est = richardson_error(runge_kutta_4, f_test, [1.0], 1.0, n, p=4)
+    est = float(np.linalg.norm(richardson_error(runge_kutta_4, f_test, [1.0], 1.0, n, p=4)[-1]))   # error en T
     assert 0.5 < est / real < 2.0, f"estimado {est:.2e}, real {real:.2e}"
 
 

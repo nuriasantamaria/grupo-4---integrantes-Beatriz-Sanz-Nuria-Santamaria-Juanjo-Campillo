@@ -9,7 +9,7 @@ import math
 import sys
 import time
 from dataclasses import dataclass, replace
-from functools import partial
+from functools import partial, lru_cache
 
 import numpy as np
 from PySide6 import QtCore, QtGui, QtWidgets
@@ -19,7 +19,7 @@ from OpenGL.GL import GL_CULL_FACE
 from pyqtgraph.opengl.GLGraphicsItem import GLOptions
 
 import numerical_engine as ne
-from space_physics import (euler_equations, kinetic_energy, angular_momentum_sq, equilibrium_analysis,
+from space_physics import (make_rhs, kinetic_energy, angular_momentum_sq, equilibrium_analysis,
                            EulerExact, euler_matches_exact,
                            sorted_axes, is_degenerate, poinsot_semiaxes, regime, surrounded_axis,
                            separatrix_curves, polhode_family, chart_axes, reduced_flow, phase_plane_orbits,
@@ -45,19 +45,6 @@ def body_half_sizes(I, min_rel=0.15):
     s = s / s.max()
     return np.maximum(s, min_rel)
 
-def rigid_body_rhs(u, t, I_mat):
-    w1, w2, w3, q0, q1, q2, q3 = u
-    dw = euler_equations(u[:3], I_mat)
-    return np.array([dw[0], dw[1], dw[2],
-                     0.5 * (-q1 * w1 - q2 * w2 - q3 * w3),
-                     0.5 * (q0 * w1 + q2 * w3 - q3 * w2),
-                     0.5 * (q0 * w2 + q3 * w1 - q1 * w3),
-                     0.5 * (q0 * w3 + q1 * w2 - q2 * w1)])
-
-
-def make_rhs(I):
-    return partial(rigid_body_rhs, I_mat=np.diag(np.asarray(I, dtype=float)))
-
 
 M_EULER = "Euler explícito"
 M_BE = "Euler implícito (inverso)"
@@ -66,23 +53,30 @@ M_RK4 = "Runge-Kutta 4"
 
 CN_TOL = 1e-12
 
-SCHEMES = {
-    M_EULER: ne.euler,
-    M_BE: partial(ne.implicit_euler, tol=CN_TOL),
-    M_CN: partial(ne.crank_nicolson, tol=CN_TOL),
-    M_RK4: ne.runge_kutta_4,
-}
+KEYS = {M_EULER: "euler", M_BE: "be", M_CN: "cn", M_RK4: "rk4"}
 
-ORDERS = {M_EULER: 1, M_BE: 1, M_CN: 2, M_RK4: 4}
+SCHEMES       = {m: ne.SCHEMES[k].step          for m, k in KEYS.items()}
+SCHEMES[M_BE] = partial(SCHEMES[M_BE], tol=CN_TOL)
+SCHEMES[M_CN] = partial(SCHEMES[M_CN], tol=CN_TOL)
+ORDERS        = {m: ne.SCHEMES[k].order         for m, k in KEYS.items()}
+AMPLIFICATION = {m: ne.SCHEMES[k].amplification for m, k in KEYS.items()}
 
-AMPLIFICATION = {
-    M_EULER: ne.amplification_euler,
-    M_BE: ne.amplification_implicit_euler,
-    M_CN: ne.amplification_crank_nicolson,
-    M_RK4: ne.amplification_runge_kutta_4,
-}
 
 METHOD_SHORT = {M_EULER: "Euler", M_BE: "Euler imp.", M_CN: "C-N", M_RK4: "RK4"}
+SCHEME_COLORS = {M_EULER: "#ff8a80", M_BE: "#b39ddb", M_CN: "#ffd740", M_RK4: "#80cbc4"}
+
+
+@lru_cache(maxsize=64)
+def stability_layer(method, re, im):
+    """Contorno |R(z)| = 1 y máscara |R| ≤ 1 de un esquema en la ventana re × im (solo depende
+    del esquema y de la ventana: se guarda en caché y no se recalcula al mover los sliders)."""
+    x, y, A = ne.stability_grid(AMPLIFICATION[method], re, im)
+    X, Y = [], []
+    for path in pg.functions.isocurve(np.minimum(A, 10.0), 1.0, connected=True):
+        P = np.asarray(path, dtype=float)                 # índices de la malla → coordenadas z
+        X += list(np.interp(P[:, 0], np.arange(len(x)), x)) + [np.nan]
+        Y += list(np.interp(P[:, 1], np.arange(len(y)), y)) + [np.nan]
+    return np.array(X), np.array(Y), A <= 1.0, (x[0], y[0], x[-1] - x[0], y[-1] - y[0])
 
 
 def equilibrium_diagnosis(cfg):
@@ -2610,6 +2604,56 @@ class MainWindow(QtWidgets.QMainWindow):
             self.eff_table), "ref.")
         self.eq_card = eq_card
 
+        # regiones de estabilidad absoluta |R(z)| ≤ 1 y dónde cae z = λΔt de cada simulación
+        sctl = QtWidgets.QWidget()
+        scl = QtWidgets.QHBoxLayout(sctl)
+        scl.setContentsMargins(0, 0, 0, 0)
+        scl.addWidget(QtWidgets.QLabel("Sombrear"))
+        self.stab_shade = QtWidgets.QComboBox()
+        self.stab_shade.addItems([METHOD_SHORT[m] for m in SCHEMES])
+        self.stab_shade.setSizeAdjustPolicy(
+            QtWidgets.QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.stab_shade.setMinimumContentsLength(10)
+        scl.addWidget(self.stab_shade)
+        self.stab_zoom = QtWidgets.QCheckBox("Acercar a los puntos")
+        self.stab_zoom.setToolTip("Encuadra los z = λΔt de las simulaciones (con Δt pequeño quedan junto al origen)")
+        scl.addWidget(self.stab_zoom)
+        scl.addStretch(1)
+        self.plot_stab = pg.PlotWidget()
+        self._style_plot(self.plot_stab, "Re z", "Im z")
+        self.plot_stab.setAspectLocked(True)
+        self.plot_stab.setMinimumHeight(300)
+        self.plot_stab.addLegend(offset=(8, 8), labelTextSize="9pt")
+        self.stab_fill = pg.ImageItem()
+        self.plot_stab.addItem(self.stab_fill)
+        for ang in (0, 90):
+            self.plot_stab.addItem(pg.InfiniteLine(angle=ang, pen=pg.mkPen((255, 255, 255, 70), width=1)),
+                                   ignoreBounds=True)
+        self.stab_curves = {m: self.plot_stab.plot(pen=pg.mkPen(SCHEME_COLORS[m], width=1.8),
+                                                   name=METHOD_SHORT[m], connect="finite") for m in SCHEMES}
+        self.stab_points = pg.ScatterPlotItem(size=10)
+        self.plot_stab.addItem(self.stab_points)
+        self.stab_shade.currentIndexChanged.connect(lambda _: self._update_stability())
+        self.stab_zoom.toggled.connect(lambda _: self._update_stability())
+        stab_card = Card("Regiones de estabilidad absoluta", body(
+            sctl, self.plot_stab,
+            note("Contorno |R(z)| = 1 de cada esquema; la zona sombreada es su región |R| ≤ 1. Los puntos son "
+                 "z = λΔt de cada simulación (λ: autovalores del equilibrio que rodea su órbita, o del eje "
+                 "intermedio si está en la separatriz). Dentro de la región la amplitud no crece.")),
+            "|R(z)| ≤ 1")
+        right_w = QtWidgets.QWidget()
+        right = QtWidgets.QVBoxLayout(right_w)
+        right.setContentsMargins(0, 0, 0, 0)
+        right.setSpacing(10)
+        right.addWidget(eq_card)
+        right.addWidget(stab_card)
+        right.addStretch(1)
+        right_sa = QtWidgets.QScrollArea()
+        right_sa.setWidgetResizable(True)
+        right_sa.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
+        right_sa.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        right_sa.setWidget(right_w)
+
         left_w = QtWidgets.QWidget()
         left = QtWidgets.QVBoxLayout(left_w)
         left.setContentsMargins(0, 0, 0, 0)
@@ -2620,7 +2664,7 @@ class MainWindow(QtWidgets.QMainWindow):
         left.addStretch(1)
         w = AdaptiveSplitter(900, sizes_h=(620, 480))
         w.addWidget(left_w)
-        w.addWidget(eq_card)
+        w.addWidget(right_sa)
         return w
 
     def _build_header(self):
@@ -3632,6 +3676,33 @@ class MainWindow(QtWidgets.QMainWindow):
             eff.append([dot(c), METHOD_SHORT[c.method], (f"ω{'₁₂₃'[d['axis']]}", {}),
                         num(g, "{:+.2e}", alert), (txt, {"color": DataTable.ALERT if alert else TEXT})])
         self.eff_table.set_rows(eff)
+        self._update_stability()
+
+    def _update_stability(self):
+        z = []
+        for c in self.configs():
+            if not c.enabled:
+                continue
+            d = equilibrium_diagnosis(c)
+            k = d["axis"] if d["axis"] is not None else sorted_axes(c.I)[1]
+            z += [(lam * c.dt, c.color) for lam in d["eqs"][k]["eigvals"] if abs(lam) > 1e-12]
+        if self.stab_zoom.isChecked() and z:
+            r = float(f"{max(3.0 * max(abs(v) for v, _ in z), 0.02):.2g}")   # redondeado: más aciertos de caché
+            view, re, im = ((-r, r), (-r, r)), (-3 * r, 3 * r), (-3 * r, 3 * r)
+        else:
+            view, re, im = ((-4.0, 2.0), (-3.5, 3.5)), (-7.0, 5.0), (-4.5, 4.5)
+        # la malla es más grande que la vista: con el aspecto fijo se ve más de lo pedido
+        for m, curve in self.stab_curves.items():
+            curve.setData(*stability_layer(m, re, im)[:2])
+        m = list(SCHEMES)[self.stab_shade.currentIndex()]
+        _, _, inside, rect = stability_layer(m, re, im)
+        img = np.zeros(inside.shape + (4,), dtype=np.ubyte)
+        img[inside] = (*QtGui.QColor(SCHEME_COLORS[m]).getRgb()[:3], 50)
+        self.stab_fill.setImage(img, autoLevels=False)
+        self.stab_fill.setRect(QtCore.QRectF(*rect))
+        self.stab_points.setData([dict(pos=(v.real, v.imag), brush=col, pen=pg.mkPen("w", width=0.8))
+                                  for v, col in z])
+        self.plot_stab.setRange(xRange=view[0], yRange=view[1], padding=0)
 
     def _update_exact_orbits(self):
         """Órbita exacta de la referencia y de las simulaciones cuya física difiere (otra I u otro Ω₀)."""

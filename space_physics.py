@@ -5,7 +5,8 @@ herramientas para medir el error de los esquemas numéricos frente a ella."""
 
 import numpy as np
 import math
-from functools import lru_cache
+from functools import lru_cache, partial
+
 
 
 def euler_equations(omega, I):
@@ -61,6 +62,20 @@ def kinetic_energy(omega, I):
 
 def angular_momentum_sq(omega, I):
     return np.sum((np.array(I) * np.asarray(omega)) ** 2, axis=-1)
+
+
+def rigid_body_rhs(u, t, I_mat):
+    # sistema completo u = (ω, q): ecuaciones de Euler + cinemática del cuaternión q' = ½ q ⊗ (0, ω)
+    w1, w2, w3, q0, q1, q2, q3 = u
+    dw = euler_equations(u[:3], I_mat)
+    return np.array([dw[0], dw[1], dw[2],
+                     0.5 * (-q1 * w1 - q2 * w2 - q3 * w3),
+                     0.5 * (q0 * w1 + q2 * w3 - q3 * w2),
+                     0.5 * (q0 * w2 + q3 * w1 - q1 * w3),
+                     0.5 * (q0 * w3 + q1 * w2 - q2 * w1)])
+
+def make_rhs(I):
+    return partial(rigid_body_rhs, I_mat=np.diag(np.asarray(I, dtype=float)))
 
 # ---------------------------------------------------------------- ampliación: solución exacta, esquemas y error
 # Geometría del espacio de fases, solución exacta de Euler (Jacobi), análisis lineal de los

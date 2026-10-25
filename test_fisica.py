@@ -188,24 +188,16 @@ def _motor():
         if "pytest" in sys.modules:
             sys.modules["pytest"].skip("numerical_engine no se pudo importar")
         raise ModuleNotFoundError("numerical_engine no se pudo importar")
-    tol = 1e-12
-    esquemas = {"euler": ne.euler, "be": partial(ne.implicit_euler, tol=tol),
-                "cn": partial(ne.crank_nicolson, tol=tol), "rk4": ne.runge_kutta_4}
-    ampl = {"euler": ne.amplification_euler, "be": ne.amplification_implicit_euler,
-            "cn": ne.amplification_crank_nicolson, "rk4": ne.amplification_runge_kutta_4}
+    tol = 1e-12                                  # esquemas y R(z) del registro ne.SCHEMES (el mismo que usa la GUI)
+    esquemas = {k: s.step for k, s in ne.SCHEMES.items()}
+    esquemas["be"] = partial(esquemas["be"], tol=tol)
+    esquemas["cn"] = partial(esquemas["cn"], tol=tol)
+    ampl = {k: s.amplification for k, s in ne.SCHEMES.items()}
     return esquemas, ampl
 
 
 def _rhs7(I):
-    Im = np.diag(np.asarray(I, float))
-
-    def f(u, t):
-        w1, w2, w3, q0, q1, q2, q3 = u
-        dw = sp.euler_equations(u[:3], Im)
-        return np.array([dw[0], dw[1], dw[2], 0.5 * (-q1 * w1 - q2 * w2 - q3 * w3),
-                         0.5 * (q0 * w1 + q2 * w3 - q3 * w2), 0.5 * (q0 * w2 + q3 * w1 - q1 * w3),
-                         0.5 * (q0 * w3 + q1 * w2 - q2 * w1)])
-    return f
+    return sp.make_rhs(I)                        # (ω, q): Euler + cinemática del cuaternión, de space_physics
 
 
 def _integrar(clave, I, w0, h, n):
@@ -259,7 +251,7 @@ def test_motor_richardson_sobre_problema_con_solucion_conocida():
         orden = ne.scheme_order(sch, f, [1.0], T, n)
         assert abs(orden - p) < 0.2, f"{M[clave]}: orden {orden:.2f}, esperado {p}"
         fino = ne.final_state(sch, f, [1.0], T, 2 * n)[0]
-        est = ne.richardson_error(sch, f, [1.0], T, n, p)
+        est = float(np.linalg.norm(ne.richardson_error(sch, f, [1.0], T, n, p)[-1]))   # error en T
         real = abs(fino - exacta)
         assert 0.5 < est / real < 2.0, f"{M[clave]}: estimado {est:.2e}, real {real:.2e}"
         extr = ne.richardson_extrapolation(sch, f, [1.0], T, n, p)[0]
@@ -267,7 +259,7 @@ def test_motor_richardson_sobre_problema_con_solucion_conocida():
 
 
 def test_motor_implicitos_convergen_con_dt_moderado():
-    """La iteración de punto fijo de BE y C-N debe converger (el residuo final bajo la tolerancia)."""
+    """El Newton de BE y C-N debe converger (el residuo final bajo la tolerancia)."""
     esquemas, _ = _motor()
     I, w0 = (1, 2, 3), (2.0, 0.3, 0.3)
     f, u = _rhs7(I), np.array([*w0, 1.0, 0, 0, 0])
@@ -277,6 +269,45 @@ def test_motor_implicitos_convergen_con_dt_moderado():
         if clave == "be":
             res = np.linalg.norm(v - u - 0.05 * f(v, 0.05))
             assert res < 1e-9, f"BE: residuo implícito {res:.1e}"
+
+
+def test_motor_implicitos_avisan_si_no_convergen():
+    """Si Newton no llega a la tolerancia debe lanzar un error, no devolver un valor que no es la solución."""
+    _motor()
+    f, u = _rhs7((1, 2, 3)), np.array([2.0, 0.3, 0.3, 1.0, 0, 0, 0])
+    for nombre, sch in (("be", ne.implicit_euler), ("cn", ne.crank_nicolson)):
+        try:
+            sch(f, u, 0.05, 0.0, max_iter=1)
+        except (RuntimeError, ArithmeticError):
+            continue
+        raise AssertionError(f"{M[nombre]}: con max_iter = 1 no avisó de que Newton no convergía")
+
+
+def test_motor_registro_de_esquemas():
+    """ne.SCHEMES empareja cada esquema con su R(z) y su orden teórico."""
+    _motor()
+    nominal = {"euler": 1, "be": 1, "cn": 2, "rk4": 4}
+    assert {k: s.order for k, s in ne.SCHEMES.items()} == nominal
+    b, A = 0.3, np.array([[0.0, -0.3], [0.3, 0.0]])    # u' = A u real, autovalores ±ib
+    for k, s in ne.SCHEMES.items():                     # un paso multiplica: por R(−0.5) en u' = −0.5 u, y ‖u‖ por |R(ib)|
+        decay = s.step(lambda u, t: -0.5 * u, np.array([1.0]), 1.0, 0.0)[0]
+        giro = np.linalg.norm(s.step(lambda u, t: A @ u, np.array([1.0, 0.0]), 1.0, 0.0))
+        assert abs(decay - s.amplification(-0.5)) < 1e-9, f"{M[k]}: R(−0.5) = {s.amplification(-0.5)}, paso = {decay}"
+        assert abs(giro - abs(s.amplification(1j * b))) < 1e-9, f"{M[k]}: |R(ib)| no coincide con el paso"
+
+
+def test_motor_regiones_de_estabilidad():
+    """stability_grid: |R| ≤ 1 donde la teoría dice (Euler: círculo |1 + z| ≤ 1; BE: |1 − z| ≥ 1; C-N: Re z ≤ 0)."""
+    _motor()
+    dentro = {"euler": [-1.0, -1.9], "be": [3.0, -2.0, 2.0j], "cn": [-0.5, -3 + 3j], "rk4": [-2.7, 2.8j]}
+    fuera = {"euler": [0.5j, 0.1], "be": [1.0 + 0.5j, 1.5], "cn": [0.1, 0.1 + 2j], "rk4": [-2.9, 3.0j]}
+    for k, s in ne.SCHEMES.items():
+        x, y, A = ne.stability_grid(s.amplification, (-4.0, 4.0), (-4.0, 4.0), n=401)
+        en = lambda z: A[np.argmin(abs(x - z.real)), np.argmin(abs(y - z.imag))]
+        for z in dentro[k]:
+            assert en(complex(z)) <= 1.0, f"{M[k]}: z = {z} debería ser estable (|R| = {en(complex(z)):.3f})"
+        for z in fuera[k]:
+            assert en(complex(z)) > 1.0, f"{M[k]}: z = {z} debería ser inestable (|R| = {en(complex(z)):.3f})"
 
 
 def test_motor_crank_nicolson_conserva_modulo():
