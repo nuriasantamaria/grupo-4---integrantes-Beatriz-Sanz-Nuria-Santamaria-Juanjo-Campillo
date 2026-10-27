@@ -21,6 +21,34 @@ try:
 except Exception:               # pragma: no cover
     ne = None                   # type: ignore[assignment]
 
+
+def _gui():
+    """Módulo de la GUI: las funciones de visualización (cartas, escenarios, veredictos…) viven allí.
+    Si no hay PySide6, la prueba se omite."""
+    import gui_reactive
+    return gui_reactive
+
+
+def euler_matches_exact(I):
+    """¿Satisface `euler_equations` la ecuación I_i dw_i = (I_j − I_k) w_j w_k (forma cíclica, índice a índice)?"""
+    I = np.asarray(I, dtype=float)
+
+    def cyclic(w):
+        return np.array([(I[(i + 1) % 3] - I[(i + 2) % 3]) / I[i] * w[(i + 1) % 3] * w[(i + 2) % 3] for i in range(3)])
+
+    ws = np.random.default_rng(1).normal(size=(3, 3))
+    return all(np.allclose(sp.euler_equations(w, np.diag(I)), cyclic(w), rtol=1e-8, atol=1e-10) for w in ws)
+
+
+def error_exponents(amplification, x=0.05):
+    """Potencias de z de |R| − 1 y de arg R − x en el eje imaginario z = ix, medidas numéricamente
+    (None en el módulo si |R| = 1)."""
+    z = np.array([x, 2 * x])
+    R = np.array([amplification(1j * v) for v in z])
+    dmod, dph = np.abs(R) - 1.0, np.angle(R) - z
+    a = None if np.all(np.abs(dmod) < 1e-13) else float(np.log2(abs(dmod[1] / dmod[0])))
+    return a, float(np.log2(abs(dph[1] / dph[0])))
+
 M = {"euler": "Euler explícito", "be": "Euler implícito", "cn": "Crank-Nicolson", "rk4": "Runge-Kutta 4"}
 CASOS = {                                    # nombre: (I, w0)
     "Janibekov (casi eje intermedio)": ((1, 2, 3), (0.01, 2.0, 0.01)),
@@ -59,7 +87,7 @@ def separatriz(sgn):
 # ------------------------------------------------------------------ space_physics: solución exacta
 def test_euler_equations_coincide_con_la_ecuacion_resuelta():
     for I in ((1, 2, 3), (3, 1, 2), (1, 1, 3), (0.5, 4, 2.2)):
-        assert sp.euler_matches_exact(I), f"euler_equations no es I_i ω̇_i = (I_j − I_k) ω_j ω_k para I={I}"
+        assert euler_matches_exact(I), f"euler_equations no es I_i ω̇_i = (I_j − I_k) ω_j ω_k para I={I}"
 
 
 def test_exacta_coincide_con_integracion_fina():
@@ -80,7 +108,7 @@ def test_separatriz_exacta_con_omega_q_positivo_y_negativo():
         tt = np.arange(0, 81) * 0.05
         err = np.abs(ex.omega(tt) - rk4_ref(I, w0, 0.0025, 1600)[::20]).max()
         assert err < 1e-6, f"signo {sgn:+d}: {err:.1e}"
-        P = ex.orbit(200)
+        P = _gui().exact_orbit(ex, 200)
         assert (P[:, 2] * sgn >= -1e-12).all(), "la órbita debe ser solo la rama que recorre ω"
 
 
@@ -97,14 +125,14 @@ def test_exacta_conserva_energia_y_momento():
 def test_equilibrios_son_constantes():
     for I, w0 in (((1, 2, 3), (0, 1.7, 0)), ((1, 2, 3), (0, 0, 0)), ((2, 2, 2), (1, 2, 3)), ((1, 1, 3), (1, 1, 0))):
         ex = sp.EulerExact(I, w0)
-        assert ex.kind == "equilibrio" and ex.orbit() is None
+        assert ex.kind == "equilibrio" and _gui().exact_orbit(ex) is None
         assert np.allclose(ex.omega(np.array([0.0, 5.0, 50.0])), np.asarray(w0, float))
 
 
 def test_orbita_cumple_las_dos_conservaciones():
     for nombre, (I, w0) in CASOS.items():
         I, w0 = np.array(I, float), np.array(w0, float)
-        P = sp.EulerExact(I, w0).orbit(300)
+        P = _gui().exact_orbit(sp.EulerExact(I, w0), 300)
         assert np.abs(np.sum(I * P ** 2, axis=1) - np.sum(I * w0 ** 2)).max() < 1e-11, nombre
         assert np.abs(np.sum((I * P) ** 2, axis=1) - np.sum((I * w0) ** 2)).max() < 1e-11, nombre
 
@@ -135,10 +163,10 @@ def test_error_parts_mide_un_retraso_conocido():
 
 # ------------------------------------------------------------------ space_physics: análisis
 def test_clasificacion_de_la_orbita():
-    assert "menor" in sp.regime((1, 2, 3), (2.0, 0.08, 0.08)) and "mayor" in sp.regime((1, 2, 3), (0.08, 0.08, 2.0))
-    assert sp.regime((1, 1, 3), (0.3, 0.2, 1.0)) == "sólido simétrico"
+    assert "menor" in _gui().regime((1, 2, 3), (2.0, 0.08, 0.08)) and "mayor" in _gui().regime((1, 2, 3), (0.08, 0.08, 2.0))
+    assert _gui().regime((1, 1, 3), (0.3, 0.2, 1.0)) == "sólido simétrico"
     I, w0 = separatriz(1)
-    assert "separatriz" in sp.regime(I, w0)
+    assert "separatriz" in _gui().regime(I, w0)
 
 
 def test_teoria_lineal_por_paso():
@@ -159,7 +187,7 @@ def test_teoria_lineal_por_paso():
 
 def test_relevancia_del_error():
     assert sp.noise_floor(10_000) > sp.noise_floor(100) > 5e-15
-    assert sp.grade(1e-17, 1e-13, 1e-6) == 0 and sp.grade(1e-9, 1e-13, 1e-6) == 1 and sp.grade(1e-3, 1e-13, 1e-6) == 2
+    assert _gui().grade(1e-17, 1e-13, 1e-6) == 0 and _gui().grade(1e-9, 1e-13, 1e-6) == 1 and _gui().grade(1e-3, 1e-13, 1e-6) == 2
 
 
 def test_convergencia_con_integradores_propios():
@@ -314,7 +342,7 @@ def test_motor_exponentes_de_error_del_registro_coinciden_con_R_de_z():
     """module_order y phase_order de ne.SCHEMES son los exponentes reales de |R(ix)| − 1 y arg R − x."""
     _motor()
     for k, s in ne.SCHEMES.items():
-        a, b = ne.error_exponents(s.amplification)
+        a, b = error_exponents(s.amplification)
         assert (a is None) == (s.module_order is None), M[k]
         if a is not None:
             assert abs(a - (s.module_order + 1)) < 0.1, f"{M[k]}: |R|−1 ∝ z^{a:.2f}"
@@ -383,39 +411,39 @@ def test_clasificacion_de_equilibrios_y_estabilidad_no_lineal():
 
 def test_descomposicion_eje_mas_perturbaciones():
     for w in ((0.01, 2.0, 0.01), (0.3, -0.1, 1.7), (0.0, 0.0, -2.0)):
-        axes = sp.axis_decomposition(w)
+        axes = _gui().axis_decomposition(w)
         a, b, c = axes
         assert abs(w[a]) >= abs(w[b]) >= abs(w[c]) and sorted(axes) == [0, 1, 2]
-        assert np.allclose(sp.omega_from_axis(axes, w[a], w[b], w[c]), w)
-    assert sp.axis_decomposition((0, 0, 0), keep=(2, 0, 1))[0] == 2
-    assert sp.inertia_ranks((3, 1, 2)) == ["máx", "mín", "medio"] and sp.inertia_ranks((1, 1, 3))[:2] == ["=", "="]
-    assert sp.triangle_violation((1, 2, 3)) is None and sp.triangle_violation((1, 1, 3)) == 2
+        assert np.allclose(_gui().omega_from_axis(axes, w[a], w[b], w[c]), w)
+    assert _gui().axis_decomposition((0, 0, 0), keep=(2, 0, 1))[0] == 2
+    assert _gui().inertia_ranks((3, 1, 2)) == ["máx", "mín", "medio"] and _gui().inertia_ranks((1, 1, 3))[:2] == ["=", "="]
+    assert _gui().triangle_violation((1, 2, 3)) is None and _gui().triangle_violation((1, 1, 3)) == 2
 
 
 def test_cartas_del_plano_de_fases():
     I, w0 = (1, 2, 3), (2.0, 0.3, 0.3)
-    k, sign = sp.default_chart(I, w0)
+    k, sign = _gui().default_chart(I, w0)
     assert (k, sign) == (0, 1)
-    i, j = sp.chart_axes(k)
+    i, j = _gui().chart_axes(k)
     twoT = 2 * float(sp.kinetic_energy(w0, I))
-    P = sp.chart_reference_orbit(I, w0, k, sign)
+    P = _gui().chart_reference_orbit(I, w0, k, sign)
     ok = np.isfinite(P).all(axis=1)
     wk = sign * np.sqrt((twoT - I[i] * P[ok, 0] ** 2 - I[j] * P[ok, 1] ** 2) / I[k])
     W = np.zeros((ok.sum(), 3)); W[:, i], W[:, j], W[:, k] = P[ok, 0], P[ok, 1], wk
     assert np.abs(sp.angular_momentum_sq(W, I) - sp.angular_momentum_sq(w0, I)).max() < 1e-8, "la órbita no conserva ‖L‖²"
-    assert sp.chart_reference_orbit(I, w0, k, -sign) is None
-    assert np.isnan(sp.project_to_chart(np.array([[1.0, 2.0, -3.0]]), 2, 1)).all()
-    D = sp.chart_domain(I, twoT, k)
+    assert _gui().chart_reference_orbit(I, w0, k, -sign) is None
+    assert np.isnan(_gui().project_to_chart(np.array([[1.0, 2.0, -3.0]]), 2, 1)).all()
+    D = _gui().chart_domain(I, twoT, k)
     assert np.allclose(I[i] * D[:, 0] ** 2 + I[j] * D[:, 1] ** 2, twoT)
 
 
 def test_muestreo_de_la_solucion_exacta_y_comparacion_de_problemas():
     ex = sp.EulerExact((1, 2, 3), (2.0, 0.3, 0.3))
-    t, W = ex.sample(5 * ex.period)
+    t, W = _gui().exact_sample(ex, 5 * ex.period)
     assert 600 <= len(t) <= 8000 and np.allclose(W, ex.omega(t))
-    assert sp.same_problem((1, 2, 3), (2, .3, .3), (1, 2, 3), (2, .3, .3)) and not sp.same_problem((1, 2, 3), (2, .3, .3), (1, 2, 4), (2, .3, .3))
-    assert sp.surface_mismatch((1, 2, 3), (2, .3, .3), (1, 2, 3), (2, .3, .3)) is None
-    m = sp.surface_mismatch((1, 2, 3), (2, .3, .3), (1, 2, 4), (2, .3, .3))
+    assert _gui().same_problem((1, 2, 3), (2, .3, .3), (1, 2, 3), (2, .3, .3)) and not _gui().same_problem((1, 2, 3), (2, .3, .3), (1, 2, 4), (2, .3, .3))
+    assert _gui().surface_mismatch((1, 2, 3), (2, .3, .3), (1, 2, 3), (2, .3, .3)) is None
+    m = _gui().surface_mismatch((1, 2, 3), (2, .3, .3), (1, 2, 4), (2, .3, .3))
     assert m is not None and not m["same_I"]
     assert sp.omega_bound((1, 2, 3), (2.0, 0.3, 0.3)) >= np.abs(ex.omega(t)).max() * 0.999
 
@@ -433,33 +461,33 @@ def test_equilibrio_efecto_del_esquema_en_el_eje_del_plano():
 def test_separatriz_pasa_por_el_equilibrio_intermedio():
     I = (1, 2, 3)
     eq = sp.principal_equilibria(I, 8.0)[1]
-    for P in sp.separatrix_curves(I, 8.0):
+    for P in _gui().separatrix_curves(I, 8.0):
         assert min(np.linalg.norm(P - eq, axis=1).min(), np.linalg.norm(P + eq, axis=1).min()) < 1e-12
         assert np.allclose((P ** 2 * np.array(I, float)).sum(axis=1), 8.0, atol=1e-12)     # 2T constante
 
 
 def test_reposo_omega_cero():
-    assert sp.regime((1, 2, 3), (0, 0, 0)) == "reposo (ω = 0)"
+    assert _gui().regime((1, 2, 3), (0, 0, 0)) == "reposo (ω = 0)"
     assert sp.surrounded_axis((1, 2, 3), (0, 0, 0)) is None
-    assert sp.orbit_stability((1, 2, 3), (0, 0, 0))[1] == "marginal"
-    assert sp.orbit_stability((1, 1, 3), (0.3, 0.2, 1.0))[1] == "marginal"
+    assert _gui().orbit_stability((1, 2, 3), (0, 0, 0))[1] == "marginal"
+    assert _gui().orbit_stability((1, 1, 3), (0.3, 0.2, 1.0))[1] == "marginal"
     assert all(e["nonlinear"] == "neutro" for e in sp.equilibrium_analysis((1, 2, 3), 0.0))
 
 
 def test_reasignar_ejes():
-    assert sp.reassign_axes((0, 1, 2), new_main=1) == (1, 0, 2)       # el principal viejo ocupa su sitio
-    assert sp.reassign_axes((0, 1, 2), new_main=2) == (2, 1, 0)
-    assert sp.reassign_axes((0, 1, 2), new_p1=2) == (0, 2, 1)
-    assert sp.reassign_axes((0, 1, 2)) == (0, 1, 2)
+    assert _gui().reassign_axes((0, 1, 2), new_main=1) == (1, 0, 2)       # el principal viejo ocupa su sitio
+    assert _gui().reassign_axes((0, 1, 2), new_main=2) == (2, 1, 0)
+    assert _gui().reassign_axes((0, 1, 2), new_p1=2) == (0, 2, 1)
+    assert _gui().reassign_axes((0, 1, 2)) == (0, 1, 2)
     for a in ((0, 1, 2), (1, 2, 0), (2, 0, 1)):                       # siempre una permutación
         for m in range(3):
-            assert sorted(sp.reassign_axes(a, new_main=m)) == [0, 1, 2]
+            assert sorted(_gui().reassign_axes(a, new_main=m)) == [0, 1, 2]
 
 
 def test_escenarios_predefinidos():
-    assert sp.DEFAULT_SCENARIO in sp.SCENARIOS and len(sp.SCENARIOS) == 8
+    assert _gui().DEFAULT_SCENARIO in _gui().SCENARIOS and len(_gui().SCENARIOS) == 8
     claves = set(ne.SCHEMES) if ne is not None else {"euler", "be", "cn", "rk4"}
-    for nombre, sc in sp.SCENARIOS.items():
+    for nombre, sc in _gui().SCENARIOS.items():
         assert len(sc.sims) == 3 and sc.note, nombre
         for sim in sc.sims:
             assert sim.get("method", "rk4") in claves, nombre
@@ -468,22 +496,22 @@ def test_escenarios_predefinidos():
 
 
 def test_campo_de_direcciones_y_actitud():
-    X, Y, U, V, h = sp.reduced_flow_field((1, 2, 3), 8.0, 0, 1)
+    X, Y, U, V, h = _gui().reduced_flow_field((1, 2, 3), 8.0, 0, 1)
     assert X.shape == Y.shape == U.shape == V.shape and len(X) > 100 and h > 0
     assert np.all(2 * X ** 2 + 3 * Y ** 2 < 0.96 * 8.0 + 1e-12)       # solo puntos dentro del dominio de la carta
     I, w = np.array([1.0, 2.0, 3.0]), np.array([0.3, 1.2, 0.4])
     q = np.array([np.cos(0.4), 0.0, np.sin(0.4), 0.0])
-    R, L_dir, w_dir = sp.attitude_vectors(q, I, w, float(np.linalg.norm(I * w)), float(np.linalg.norm(w)))
+    R, L_dir, w_dir = _gui().attitude_vectors(q, I, w, float(np.linalg.norm(I * w)), float(np.linalg.norm(w)))
     assert np.allclose(R @ R.T, np.eye(3)) and abs(np.linalg.norm(L_dir) - 1) < 1e-12
     assert abs(np.linalg.norm(w_dir) - 1) < 1e-12
 
 
 def test_tendencia_y_resolucion_del_paso():
-    assert (sp.amplitude_trend(1e-3), sp.amplitude_trend(-1e-3), sp.amplitude_trend(0.0)) == ("crece", "decae", "se conserva")
+    assert (_gui().amplitude_trend(1e-3), _gui().amplitude_trend(-1e-3), _gui().amplitude_trend(0.0)) == ("crece", "decae", "se conserva")
     lin = sp.linear_step_errors((1, 2, 3), (2.0, 0.3, 0.3), lambda z: 1 + z, 0.05)
-    res = sp.step_resolution(lin, 0.05)
+    res = _gui().step_resolution(lin, 0.05)
     assert not res["coarse"] and res["steps_per_cycle"] > 50
-    res = sp.step_resolution(sp.linear_step_errors((1, 2, 3), (2.0, 0.3, 0.3), lambda z: 1 + z, 0.3), 0.3)
+    res = _gui().step_resolution(sp.linear_step_errors((1, 2, 3), (2.0, 0.3, 0.3), lambda z: 1 + z, 0.3), 0.3)
     assert res["coarse"]
 
 
@@ -519,22 +547,22 @@ def test_motor_richardson_detecta_ruido_de_redondeo():
 def test_motor_contorno_de_estabilidad():
     _motor()
     for clave, s in ne.SCHEMES.items():
-        X, Y, inside, rect = ne.stability_contour(s.amplification, (-7.0, 5.0), (-4.5, 4.5))
+        X, Y, inside, rect = _gui().stability_contour(s.amplification, (-7.0, 5.0), (-4.5, 4.5))
         z = (X + 1j * Y)[np.isfinite(X)]
         assert z.size > 100, clave
         assert np.max(np.abs(np.abs(s.amplification(z)) - 1)) < 5e-3, clave      # el contorno es |R| = 1
         assert inside.shape == (301, 301) and rect[2] == 12.0 and rect[3] == 9.0
-    view, re, im = ne.stability_window(np.array([0.1 + 0.2j]), True)
+    view, re, im = _gui().stability_window(np.array([0.1 + 0.2j]), True)
     assert view[0][1] > 0 and re == (-3 * view[0][1], 3 * view[0][1])
-    assert ne.stability_window(np.array([]), True)[0] == ((-4.0, 2.0), (-3.5, 3.5))
+    assert _gui().stability_window(np.array([]), True)[0] == ((-4.0, 2.0), (-3.5, 3.5))
 
 
 def test_motor_utilidades_numericas():
     _motor()
     d = np.array([1e-20, -1e-3, 0.5])
-    assert np.isnan(ne.mask_below(d, 1e-16)[0]) and ne.mask_below(d, 1e-16)[1] == 1e-3
-    assert np.all(ne.log_safe(d) > 0)
-    seg = ne.arrow_segments(np.zeros(2), np.zeros(2), np.array([1.0, 0.0]), np.array([0.0, 0.0]), 1.0)
+    assert np.isnan(_gui().mask_below(d, 1e-16)[0]) and _gui().mask_below(d, 1e-16)[1] == 1e-3
+    assert np.all(_gui().log_safe(d) > 0)
+    seg = _gui().arrow_segments(np.zeros(2), np.zeros(2), np.array([1.0, 0.0]), np.array([0.0, 0.0]), 1.0)
     assert seg.shape == (6, 2)                                  # el campo nulo no dibuja flecha
     assert np.allclose(seg[0], [-0.5, 0.0]) and np.allclose(seg[1], [0.5, 0.0])
     assert all(s.label and s.short for s in ne.SCHEMES.values())
@@ -546,13 +574,13 @@ def test_estabilidad_del_eje_intermedio_frente_a_los_extremos():
     (llega a ~180°) y sí en los extremos (∝ perturbación)."""
     I = (1.0, 2.0, 3.0)
     for eps in (0.3, 0.1, 0.01):
-        assert sp.max_deviation(I, (eps, 2.0, eps)) > 160.0
-        assert sp.orbit_stability(I, (eps, 2.0, eps))[1] == "inestable"
-        assert sp.max_deviation(I, (2.0, eps, eps)) < 120 * eps
-        assert sp.orbit_stability(I, (2.0, eps, eps))[1] == "estable"
-        assert sp.orbit_stability(I, (eps, eps, 2.0))[1] == "estable"
-    assert sp.max_deviation(I, (2.0, 0.01, 0.01)) < 1.0
-    assert "inestable" in sp.orbit_stability(I, (0.01, 2.0, 0.01))[0]      # sobre la separatriz también
+        assert _gui().max_deviation(I, (eps, 2.0, eps)) > 160.0
+        assert _gui().orbit_stability(I, (eps, 2.0, eps))[1] == "inestable"
+        assert _gui().max_deviation(I, (2.0, eps, eps)) < 120 * eps
+        assert _gui().orbit_stability(I, (2.0, eps, eps))[1] == "estable"
+        assert _gui().orbit_stability(I, (eps, eps, 2.0))[1] == "estable"
+    assert _gui().max_deviation(I, (2.0, 0.01, 0.01)) < 1.0
+    assert "inestable" in _gui().orbit_stability(I, (0.01, 2.0, 0.01))[0]      # sobre la separatriz también
 
 
 def main():
