@@ -16,14 +16,13 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, TypedDict
 
 import numpy as np
 
+from simulation import divergence as dv
 import numerical_engine as ne
 from numerical_engine import Array
 from space_physics import (ArrayLike, Convergence, EulerExact, LinearErrors, conservation_drift, conserved_quantities,
                            convergence_study, initial_state, make_jacobian, make_rhs, omega_bound,
                            linear_step_errors)
 
-DIVERGENCE_FACTOR = 1e3          # ‖ω‖ > 1e3 · (máximo posible en la órbita exacta) ⇒ la simulación diverge
-DIVERGENCE_LIMIT = 1e6           # Σ|ω| a partir de la cual una trayectoria se da por perdida (NaN)
 MAX_PREVIEW_STEPS = 300_000
 MAX_LIVE_STEPS = 1_000_000
 PREVIEW_CHUNK = 2000
@@ -51,7 +50,7 @@ class SimConfig:
 
 def integrate(method: str, y0: ArrayLike, dt: float, I: ArrayLike, n: int, t0: float = 0.0) -> Array:
     """n pasos de `method` sobre el sólido I desde el estado completo y0 (ω, q)."""
-    return ne.integrate(step_for(method, I), make_rhs(I), np.asarray(y0, dtype=float), dt, n, t0, limit=DIVERGENCE_LIMIT)
+    return ne.integrate(step_for(method, I), make_rhs(I), np.asarray(y0, dtype=float), dt, n, t0, stop=dv.stop_criterion())
 
 
 def linear_errors(cfg: SimConfig) -> Optional[LinearErrors]:
@@ -80,7 +79,7 @@ class Simulation:
         self.T0, self.L0 = conserved_quantities(w0, self.I)
         self.Ls0 = self.I * w0
         self.w_bound = omega_bound(self.I, w0)   # ‖ω‖ máximo posible en la órbita exacta
-        self._blow = DIVERGENCE_FACTOR * self.w_bound
+        self._blow = dv.omega_threshold(self.I, w0)
         self.exact = EulerExact(self.I, w0)
         self.view_n: Optional[int] = None        # None = en vivo; k = se muestra el historial hasta la fila k-1
         self._Y = np.empty((self.CHUNK, 7))
@@ -213,7 +212,7 @@ class Simulation:
         except Exception as exc:                # p. ej. Newton sin converger en un esquema implícito
             self.diverged, self.error = True, f"{type(exc).__name__}: {exc}"
             return
-        bad = ne.first_divergence(Y, self._blow)    # no finito o muy por encima de lo posible en la órbita exacta
+        bad = dv.first_divergence(Y, self._blow)    # no finito o muy por encima de lo posible en la órbita exacta
         if bad is not None:
             Y = Y[:bad]
             self.diverged = True

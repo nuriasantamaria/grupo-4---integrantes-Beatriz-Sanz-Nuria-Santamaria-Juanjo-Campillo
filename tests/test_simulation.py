@@ -6,7 +6,7 @@ import sys
 
 import numpy as np
 
-import simulation as sm
+import simulation.simulation as sm
 
 
 def cfg(method="rk4", dt=0.02, I=(1.0, 2.0, 3.0), w0=(0.01, 2.0, 0.01)):
@@ -121,7 +121,7 @@ def test_run_each_aisla_los_fallos_y_respeta_los_desactivados():
 
 
 def test_jacobiana_exacta_del_campo_y_newton_con_ella():
-    import numerical_engine as ne
+    import numerical_engine.numerical_engine as ne
     import space_physics as sp
     I = np.array([1.0, 2.0, 3.0])
     f, J = sp.make_rhs(I), sp.make_jacobian(I)

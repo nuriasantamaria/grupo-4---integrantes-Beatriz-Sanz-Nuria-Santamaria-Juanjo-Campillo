@@ -7,7 +7,7 @@
 """
 
 from space_physics.equilibria import (SEPARATRIX_TOL, Equilibrium, analytic_eigenvalues, equilibrium_analysis,
-                                separatrix_side, surrounded_axis)
+                                principal_equilibria, separatrix_side, surrounded_axis)
 from space_physics.errors import (Convergence, EquilibriumAmplification, LinearErrors, conservation_drift,
                             convergence_study, equilibrium_amplification, linear_step_errors, noise_floor,
                             predicted_errors, relevant_eigenvalues)

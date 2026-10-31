@@ -5,23 +5,46 @@ comparación de esquemas numéricos frente a la solución exacta de Jacobi.
 
 ## Arranque
 
+Desde la raíz del repositorio:
+
 ```bash
 pip install PySide6 pyqtgraph PyOpenGL numpy
-python gui_reactive.py
+python main.py
 ```
 
-## Estructura (tres capas)
+## Estructura (cuatro capas)
 
-| Archivo | Capa | Contenido |
+Cada capa es un paquete. Las dependencias van siempre hacia abajo y no hay ciclos: `visualization` usa `simulation`, y `simulation` une `space_physics` y `numerical_engine`, que no se conocen entre sí. El diagrama completo está en [FLOWCHART.md](FLOWCHART.md).
+
+| Carpeta | Capa | Archivos |
 |---|---|---|
-| `space_physics.py` | Física | Sin Qt ni numérica. Ecuaciones de Euler, invariantes 2T y ‖L‖², cuaternión, **equilibrios con autovalores analíticos** y estabilidad lineal/no lineal, geometría de Poinsot (elipsoides, polhodias, separatriz), cartas del plano de fases, **solución exacta** (`EulerExact`, funciones de Jacobi), teoría lineal por paso, clasificación del error, escenarios predefinidos (`SCENARIOS`), reglas de edición de Ω₀ por ejes. |
-| `numerical_engine.py` | Algorítmica | Genérica (no sabe nada del sólido). Esquemas Euler, Euler implícito, Crank–Nicolson y RK4 con su registro `SCHEMES` (orden, R(z), nombre), `cauchy_problem`/`integrate`, Richardson (`richardson_analysis`), regiones de estabilidad (`stability_contour`), utilidades (`n_steps`, `arrow_segments`, `mask_below`). Valida sus entradas. |
-| `simulation.py` | Modelo de la GUI (sin Qt) | Une las dos capas: `Simulation` (historial, derivas, error frente a la exacta, divergencia, rebobinado, cambio de esquema al vuelo), `run_preview`, `richardson_report`, `convergence_report`. |
-| `gui_reactive.py` | Visualización | PySide6 + pyqtgraph. Solo dibuja y orquesta: sliders, pestañas, 3D, tablas. |
-| `test_fisica.py`, `test_simulation.py`, `test_richardson.py` | Pruebas | Física, motor numérico, sesión de simulación y Richardson. |
+| `space_physics/` | Física (sin Qt ni numérica) | `model.py`: ecuaciones de Euler, invariantes 2T y ‖L‖², cuaternión, campo f(u, t) y su Jacobiana, cota `omega_bound`. `exact.py`: **solución exacta** (`EulerExact`, funciones de Jacobi). `equilibria.py`: **equilibrios con autovalores analíticos**, estabilidad lineal/no lineal, lado de la separatriz. `errors.py`: teoría lineal por paso, deriva de T y ‖L‖, ruido de redondeo, estudio de convergencia. |
+| `numerical_engine/` | Algorítmica (genérica, no sabe nada del sólido) | `numerical_engine.py`: esquemas Euler, Euler implícito, Crank–Nicolson y RK4 con su registro `SCHEMES` (orden, R(z), nombre), `cauchy_problem`/`integrate`, Richardson (`richardson_analysis`), malla de estabilidad (`stability_grid`). Valida sus entradas. |
+| `simulation/` | Modelo de la GUI (sin Qt) | `simulation.py`: `Simulation` (historial, derivas, error frente a la exacta, rebobinado, cambio de esquema al vuelo), `run_preview`, `richardson_report`, `convergence_report`. `divergence.py`: detección de divergencia a partir del módulo de ω (`stop_criterion`, `first_divergence`, `omega_threshold`). |
+| `visualization/` | Visualización (PySide6 + pyqtgraph) | Ver la tabla siguiente. |
+| `tests/` | Pruebas | `test_fisica.py`, `test_simulation.py`, `test_richardson.py`: física, motor numérico, sesión de simulación y Richardson. |
+| raíz | Arranque | `main.py`: llama a `visualization.main()`. |
 
-Todas las funciones de las tres primeras capas llevan *type hints* y pasan `mypy --strict`:
-`python -m mypy numerical_engine.py space_physics.py simulation.py --ignore-missing-imports --strict`.
+`visualization/` se divide en módulos sin Qt, que se pueden importar y probar sin interfaz, y módulos con Qt:
+
+| Archivo | Qt | Contenido |
+|---|---|---|
+| `palette.py` | no | Colores. |
+| `schemes.py` | no | Etiquetas, colores y órdenes de cada esquema; región de estabilidad en caché. |
+| `geometry.py` | no | Forma y actitud del cuerpo, elipsoides de Poinsot, polhodias, separatriz, cartas del plano de fases, puntos de la solución exacta. |
+| `initial_conditions.py` | no | Edición de Ω₀ por ejes y comparación de problemas. |
+| `plot_tools.py` | no | Escalas, máscaras, flechas y contorno de la región de estabilidad (`stability_contour`). |
+| `verdicts.py` | no | Gravedad de los errores, resolución del paso, estabilidad de la órbita (`max_deviation`, `FLIP_DEG`). |
+| `cells.py` | no | Celdas de tabla. |
+| `scenarios.py` | no | Escenarios predefinidos (`SCENARIOS`) y configuración inicial. |
+| `help_text.py` | no | Texto de la ayuda (F1). |
+| `theme.py` | sí | Fuentes (`setup_fonts`), hoja de estilos, estilos HTML/CSS. |
+| `widgets.py` | sí | Tablas, tarjetas, layouts, cursor enlazado. |
+| `controls.py` | sí | Sliders y paneles de parámetros (I, Ω₀, cada simulación). |
+| `workers.py` | sí | Hilos de previsualización y análisis. |
+| `skins/` | sí | Cuerpos 3D: `meshes.py` (primitivas y `Rig`), `satellite.py`, `cow.py`, `ufo.py`, `fighter.py`. |
+| `window/main_window.py` | sí | `MainWindow`: compone controles, gráficas, vista 3D y análisis. |
+| `app.py` | sí | `main()`: crea la aplicación Qt y abre la ventana. |
 
 ## Equilibrios y estabilidad
 
@@ -81,7 +104,7 @@ Las fichas superiores separan tres cosas: **Órbita** (estabilidad física: depe
 
 ## Avisos
 
-- *Divergió*: ‖ω‖ supera 1e3 veces lo posible en la órbita exacta; la simulación se congela (las demás siguen).
+- *Divergió*: ‖ω‖ supera 1e3 veces lo posible en la órbita exacta (`simulation/divergence.py`); la simulación se congela (las demás siguen).
 - *Falló*: `numerical_engine` lanzó una excepción (p. ej. Newton sin converger); se congela igual y el mensaje aparece en la ficha y en la barra de estado.
 - *Δt demasiado grande*: Δt·β > 0,25 (menos de ≈ 25 pasos por ciclo).
 
@@ -91,9 +114,12 @@ Las fichas superiores separan tres cosas: **Órbita** (estabilidad física: depe
 
 ## Pruebas
 
+Desde la raíz del repositorio, como módulos (con `python tests/test_fisica.py` no se encuentran los paquetes):
+
 ```bash
-python test_fisica.py     # ✔ correcto · ✘ fallo · ⚠ aviso · · omitido
-# o:  pytest test_fisica.py
-python test_simulation.py
-python test_richardson.py
+python -m tests.test_fisica       # ✔ correcto · ✘ fallo · ⚠ aviso · · omitido
+python -m tests.test_simulation
+python -m tests.test_richardson
 ```
+
+Las pruebas de `test_fisica.py` sobre la geometría y los veredictos de la interfaz usan los módulos sin Qt de `visualization/`, así que no necesitan PySide6.

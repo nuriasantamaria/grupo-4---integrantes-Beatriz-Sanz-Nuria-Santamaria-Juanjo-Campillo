@@ -19,6 +19,15 @@ class Equilibrium(TypedDict):
 
 # ============================================================== EQUILIBRIA
 
+def principal_equilibria(I, twoT):
+    """Fila k = rotación pura sobre el eje k con energía 2T: omega = sqrt(2T/I_k) * e_k"""
+    I = np.asarray(I, dtype=float)
+    eq = np.zeros((3, 3))
+    for k in range(3):
+        eq[k, k] = np.sqrt(twoT / I[k])
+    return eq
+
+
 def analytic_eigenvalues(I, twoT):
     """Fila k = autovalores (0, mu, -mu) de la Jacobiana en el eje k; mu es imaginario en los ejes extremos"""
     I = np.asarray(I, dtype=float)
@@ -35,9 +44,7 @@ def equilibrium_analysis(I, twoT):
     I = np.asarray(I, dtype=float)
     lam = analytic_eigenvalues(I, twoT)
     result = []
-    for k in range(3):
-        omega = np.zeros(3)
-        omega[k] = np.sqrt(twoT / I[k])               # rotación pura sobre el eje k con energía 2T
+    for k, omega in enumerate(principal_equilibria(I, twoT)):
         # lineal: autovalores (0, mu, -mu); traza nula, así que no hay nodos ni focos
         small = 1e-9 * max(1.0, np.max(np.abs(lam[k])))   # por debajo de esto se considera cero
         if np.all(np.abs(lam[k]) <= small):
@@ -63,6 +70,9 @@ def equilibrium_analysis(I, twoT):
 
 # ============================================================== SEPARATRIX
 
+SEPARATRIX_TOL = 1e-3            # si |side| queda por debajo, la órbita se da por sobre la separatriz
+
+
 def separatrix_side(I, w0):
     """(|L|^2 - 2T*I_med) / (2T*I_med): > 0 la órbita rodea el eje mayor, < 0 el menor, ~ 0 separatriz"""
     I = np.asarray(I, dtype=float)
@@ -71,7 +81,7 @@ def separatrix_side(I, w0):
     return float((angular_momentum_sq(w0, I) - twoT_Ib) / twoT_Ib)
 
 
-def surrounded_axis(I, w0, tol= 1e-3):
+def surrounded_axis(I, w0, tol=SEPARATRIX_TOL):
     """Eje (mayor o menor inercia) que rodea la órbita; None en separatriz, simétrico o reposo"""
     twoT = 2 * kinetic_energy(w0, I)
     if is_degenerate(I) or twoT <= 0:
