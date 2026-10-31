@@ -16,9 +16,9 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, TypedDict
 
 import numpy as np
 
-from simulation import divergence as dv
-import numerical_engine as ne
-from numerical_engine import Array
+import simulation.divergence as dv
+import numerical_engine.numerical_engine as ne
+from numerical_engine.numerical_engine import Array
 from space_physics import (ArrayLike, Convergence, EulerExact, LinearErrors, conservation_drift, conserved_quantities,
                            convergence_study, initial_state, make_jacobian, make_rhs, omega_bound,
                            linear_step_errors)
