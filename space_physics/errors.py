@@ -1,14 +1,19 @@
-"""¿Cuánto se equivoca el esquema? Error previsto (teoría lineal), medido (deriva, convergencia) y ruido de redondeo"""
+"""Error cometido por el esquema numérico. Error previsto (teoría lineal), medido (deriva, convergencia) y ruido 
+de redondeo."""
+
+from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from typing import TypedDict
 
 import numpy as np
 import numpy.typing as npt
+from numpy.typing import ArrayLike, NDArray
 
-from space_physics.equilibria import analytic_eigenvalues, equilibrium_analysis, surrounded_axis
+from space_physics.equilibria import equilibrium_analysis, surrounded_axis, dominant_eigenvalue
 from space_physics.exact import EulerExact
-from space_physics.model import Array, angular_momentum_sq, is_degenerate, kinetic_energy, sorted_axes
+from space_physics.model import Array, angular_momentum_sq, is_degenerate, kinetic_energy
 
 
 class LinearErrors(TypedDict):
@@ -49,26 +54,15 @@ def conservation_drift(W, I, T0, L0):
 
 # ============================================================== LINEAR THEORY
 
-def _dominant_eigenvalue(I, w0, k):
-    """(tipo, λ) del equilibrio k con la energía de w0: en un centro el de mayor |Im|, si no el de mayor Re"""
-    twoT = 2 * float(kinetic_energy(w0, I))
-    if twoT <= 0 or is_degenerate(I):
-        return None
-    e = equilibrium_analysis(I, twoT)[k]
-    lam = e["eigvals"]
-    if e["type"] == "centro":
-        return e["type"], complex(lam[np.argmax(np.abs(lam.imag))])
-    return e["type"], complex(lam[np.argmax(lam.real)])
-
 
 def linear_step_errors(I, w0, amplification, dt):
     """Errores por paso de módulo y fase del esquema en el centro que rodea la órbita; None si no hay centro"""
     axis = surrounded_axis(I, w0)
     if axis is None:
         return None
-    kind, lam = _dominant_eigenvalue(I, w0, axis)
-    beta = abs(lam.imag)                              # frecuencia de las pequeñas oscilaciones
-    if kind != "centro" or beta <= 0:
+    twoT = 2 * float(kinetic_energy(w0, I))
+    beta = abs(dominant_eigenvalue(I, twoT, axis).imag)    # frecuencia de las pequeñas oscilaciones
+    if beta <= 0:
         return None
     R = complex(amplification(1j * beta * dt))
     return {"axis": axis, "beta": beta, "R": R, "dmod": abs(R) - 1.0,
@@ -76,21 +70,13 @@ def linear_step_errors(I, w0, amplification, dt):
 
 
 def equilibrium_amplification(I, w0, k, amplification, dt):
-    """|R(λ·dt)| en el equilibrio k con la energía de w0; None si no hay energía o es simétrico"""
-    found = _dominant_eigenvalue(I, w0, k)
-    if found is None:
+    """|R(lambda*dt)| en el equilibrio k con la energía de w0; None si no hay energía o es simétrico"""
+    twoT = 2 * float(kinetic_energy(w0, I))
+    if twoT <= 0 or is_degenerate(I):
         return None
-    kind, lam = found
+    kind = equilibrium_analysis(I, twoT)[k]["type"]
+    lam = dominant_eigenvalue(I, twoT, k)
     return {"type": kind, "lam": lam, "R": float(abs(amplification(lam * dt)))}
-
-
-def relevant_eigenvalues(I, w0):
-    """Autovalores no nulos del equilibrio que rodea la órbita o, en separatriz o simétrico, del eje intermedio"""
-    k = surrounded_axis(I, w0)
-    if k is None:
-        k = sorted_axes(I)[1]
-    lam = analytic_eigenvalues(I, 2 * float(kinetic_energy(w0, I)))[k]
-    return lam[np.abs(lam) > 1e-12]
 
 
 def noise_floor(n_steps):

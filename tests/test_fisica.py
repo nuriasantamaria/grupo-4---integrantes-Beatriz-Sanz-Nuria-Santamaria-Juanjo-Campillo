@@ -32,7 +32,7 @@ def euler_matches_exact(I):
         return np.array([(I[(i + 1) % 3] - I[(i + 2) % 3]) / I[i] * w[(i + 1) % 3] * w[(i + 2) % 3] for i in range(3)])
 
     ws = np.random.default_rng(1).normal(size=(3, 3))
-    return all(np.allclose(sp.euler_equations(w, np.diag(I)), cyclic(w), rtol=1e-8, atol=1e-10) for w in ws)
+    return all(np.allclose(sp.euler_equations(w, I), cyclic(w), rtol=1e-8, atol=1e-10) for w in ws)
 
 
 def error_exponents(amplification, x=0.05):
@@ -58,7 +58,7 @@ CASOS = {                                    # nombre: (I, w0)
 
 # ------------------------------------------------------------------ utilidades
 def rhs3(I, w):
-    return np.asarray(sp.euler_equations(w, np.diag(np.asarray(I, float))), dtype=float).reshape(3)
+    return np.asarray(sp.euler_equations(w, np.asarray(I, float)), dtype=float).reshape(3)
 
 
 def rk4_ref(I, w0, h, n):
@@ -390,7 +390,7 @@ def test_autovalores_analiticos_coinciden_con_los_numericos():
         I, twoT = rng.uniform(0.3, 5, 3), rng.uniform(0.1, 20)
         lam = sp.analytic_eigenvalues(I, twoT)
         for k, om in enumerate(sp.principal_equilibria(I, twoT)):
-            num = np.linalg.eigvals(sp.jacobian_matrix(om, np.diag(I)))
+            num = np.linalg.eigvals(sp.jacobian_matrix(om, np.asarray(I, float)))
             assert np.allclose(np.sort(np.abs(num)), np.sort(np.abs(lam[k])), atol=1e-12), (I, k)
 
 

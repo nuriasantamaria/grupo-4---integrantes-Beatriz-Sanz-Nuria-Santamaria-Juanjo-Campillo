@@ -3,6 +3,7 @@
     python test_simulation.py     → informe con ✔ / ✘
     pytest test_simulation.py"""
 import sys
+from functools import partial
 
 import numpy as np
 
@@ -129,8 +130,9 @@ def test_jacobiana_exacta_del_campo_y_newton_con_ella():
     assert np.max(np.abs(J(u, 0.0) - ne.my_jacobian(lambda y: f(y, 0.0), u, eps=1e-6))) < 1e-6
     y0 = sp.initial_state([0.3, 1.7, -0.4])
     for m in ("be", "cn"):                      # con Jacobiana exacta o por diferencias finitas: misma solución
-        exacta = sm.integrate(m, y0, 0.05, I, 200)
-        fd = ne.integrate(ne.SCHEMES[m].step, f, y0, 0.05, 200)
+        step = ne.SCHEMES[m].step
+        exacta = ne.integrate(partial(step, jac=J), f, y0, 0.05, 200)
+        fd = ne.integrate(step, f, y0, 0.05, 200)
         assert np.max(np.abs(exacta - fd)) < 1e-9
 
 

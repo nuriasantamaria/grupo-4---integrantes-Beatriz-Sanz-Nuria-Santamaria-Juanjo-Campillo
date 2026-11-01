@@ -10,9 +10,10 @@ from __future__ import annotations
 from typing import Callable
 
 import numpy as np
+from numpy.typing import ArrayLike
 
 from numerical_engine.numerical_engine import Array, Component
-from space_physics import ArrayLike, omega_bound
+from space_physics import omega_bound
 
 OMEGA = slice(0, 3)              # columnas de ω en el estado (ω, q)
 DIVERGENCE_FACTOR = 1e3          # ‖ω‖ > 1e3 · (máximo posible en la órbita exacta) ⇒ la simulación diverge

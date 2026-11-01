@@ -7,8 +7,9 @@ from functools import lru_cache
 from typing import TypedDict
 
 import numpy as np
+from numpy.typing import ArrayLike
 
-from space_physics import (ArrayLike, EulerExact, is_degenerate, kinetic_energy, LinearErrors, noise_floor,
+from space_physics import (EulerExact, is_degenerate, kinetic_energy, LinearErrors, noise_floor,
                            predicted_errors, separatrix_side, SEPARATRIX_TOL, surrounded_axis)
 
 from visualization.cells import dot

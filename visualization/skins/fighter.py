@@ -6,8 +6,9 @@ import math
 from typing import Any
 
 import numpy as np
+from numpy.typing import ArrayLike
 
-from space_physics import Array, ArrayLike
+from space_physics import Array
 
 from visualization.skins.meshes import blob, lathe, merge, ngon, Rig, slab, tube
 

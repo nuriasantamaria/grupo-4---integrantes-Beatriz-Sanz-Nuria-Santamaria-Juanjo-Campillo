@@ -6,13 +6,13 @@ import math
 from typing import Any, Sequence, Union
 
 import numpy as np
-from numpy.typing import NDArray
+from numpy.typing import ArrayLike, NDArray
 from PySide6 import QtGui
 import pyqtgraph.opengl as gl
 from OpenGL.GL import GL_CULL_FACE
 from pyqtgraph.opengl.GLGraphicsItem import GLOptions
 
-from space_physics import Array, ArrayLike
+from space_physics import Array
 
 
 IntArray = NDArray[np.intp]

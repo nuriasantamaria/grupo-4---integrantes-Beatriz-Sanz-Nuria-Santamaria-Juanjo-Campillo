@@ -9,6 +9,7 @@ from functools import partial
 from typing import Any, Callable
 
 import numpy as np
+from numpy.typing import ArrayLike
 from PySide6 import QtCore, QtGui, QtWidgets
 import pyqtgraph as pg
 import pyqtgraph.opengl as gl
@@ -16,7 +17,7 @@ import pyqtgraph.opengl as gl
 import numerical_engine as ne
 from simulation import (convergence_report, linear_errors, MAX_LIVE_STEPS, MAX_PREVIEW_STEPS,
                         richardson_report, SimConfig, Simulation)
-from space_physics import (angular_momentum_sq, Array, ArrayLike, equilibrium_amplification,
+from space_physics import (angular_momentum_sq, Array, equilibrium_amplification,
                            equilibrium_analysis, EulerExact, kinetic_energy, LinearErrors, noise_floor,
                            predicted_errors, relevant_eigenvalues)
 

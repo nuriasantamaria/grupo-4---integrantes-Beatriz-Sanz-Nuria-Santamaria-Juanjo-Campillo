@@ -15,11 +15,12 @@ from functools import partial
 from typing import Any, Callable, Dict, List, Optional, Tuple, TypedDict
 
 import numpy as np
+from numpy.typing import ArrayLike
 
 import simulation.divergence as dv
 import numerical_engine.numerical_engine as ne
 from numerical_engine.numerical_engine import Array
-from space_physics import (ArrayLike, Convergence, EulerExact, LinearErrors, conservation_drift, conserved_quantities,
+from space_physics import (Convergence, EulerExact, LinearErrors, conservation_drift, conserved_quantities,
                            convergence_study, initial_state, make_jacobian, make_rhs, omega_bound,
                            linear_step_errors)
 
@@ -31,9 +32,17 @@ PREVIEW_CHUNK = 2000
 STEPS: Dict[str, ne.Step] = {k: s.step for k, s in ne.SCHEMES.items()}
 
 
+# Jacobiana del Newton de los esquemas implícitos:
+#   False -> numérica, por diferencias centradas de orden 2 (my_jacobian de numerical_engine)
+#   True  -> exacta, la analítica del sólido (make_jacobian de space_physics)
+EXACT_NEWTON_JACOBIAN = False
+
+
 def step_for(method: str, I: ArrayLike) -> ne.Step:
-    """Paso del esquema `method`; los implícitos reciben la Jacobiana exacta del sólido I para su Newton."""
-    return partial(STEPS[method], jac=make_jacobian(I)) if ne.SCHEMES[method].implicit else STEPS[method]
+    """Paso del esquema `method`; en los implícitos, Newton usa la Jacobiana que elige EXACT_NEWTON_JACOBIAN"""
+    if ne.SCHEMES[method].implicit and EXACT_NEWTON_JACOBIAN:
+        return partial(STEPS[method], jac=make_jacobian(I))
+    return STEPS[method]
 
 
 @dataclass
@@ -305,4 +314,5 @@ def run_each(cfgs: List[SimConfig], job: Callable[[SimConfig], Any],
         except Exception as exc:                # un esquema que falla no impide analizar los demás
             out[k] = exc
     return out
+
 

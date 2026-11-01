@@ -6,9 +6,10 @@ from __future__ import annotations
 import math
 
 import numpy as np
+from numpy.typing import ArrayLike
 
-from space_physics import (angular_momentum_sq, Array, ArrayLike, euler_equations, EulerExact, is_degenerate,
-                           kinetic_energy, SEP_M, sorted_axes, surrounded_axis, Vec)
+from space_physics import (angular_momentum_sq, Array, euler_equations, EulerExact, is_degenerate,
+                           kinetic_energy, SEP_M, sorted_axes, surrounded_axis)
 
 
 # No intervienen en la resolución del problema: space_physics y numerical_engine no los usan.
@@ -33,7 +34,7 @@ def triangle_violation(I: ArrayLike, tol: float = 1e-9) -> int | None:
     return next((k for k in range(3) if I[k] > I[(k + 1) % 3] + I[(k + 2) % 3] + tol), None)
 
 
-def body_half_sizes(I: Vec, min_rel: float = 0.15) -> Array:
+def body_half_sizes(I: ArrayLike, min_rel: float = 0.15) -> Array:
     """Semiejes relativos (máx = 1) de una caja homogénea con esos momentos de inercia; los imposibles se acotan en min_rel"""
     I1, I2, I3 = (float(x) for x in I)
     s = np.sqrt(np.maximum([I2 + I3 - I1, I1 + I3 - I2, I1 + I2 - I3], 0.0))
@@ -130,7 +131,7 @@ def chart_axes(k: int) -> tuple[int, int]:
     return (k + 1) % 3, (k + 2) % 3
 
 
-def default_chart(I: ArrayLike, w0: Vec) -> tuple[int, int]:
+def default_chart(I: ArrayLike, w0: ArrayLike) -> tuple[int, int]:
     """(eje k, signo) de la carta natural: la del eje que rodea la órbita (o el intermedio) y el hemisferio de omega0"""
     k = surrounded_axis(I, w0)
     if k is None:
@@ -163,7 +164,7 @@ def reduced_flow(I: ArrayLike, twoT: float, k: int, sign: int, X: ArrayLike, Y: 
     W = np.zeros((3,) + X.shape)
     W[i], W[j] = X, Y
     W[k] = sign * np.sqrt(np.maximum(twoT - I[i] * X ** 2 - I[j] * Y ** 2, 0) / I[k])
-    dW = euler_equations(W, np.diag(I))
+    dW = euler_equations(W, I)
     return dW[i], dW[j]
 
 

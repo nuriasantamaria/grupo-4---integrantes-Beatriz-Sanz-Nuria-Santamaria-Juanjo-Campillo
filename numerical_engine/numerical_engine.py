@@ -1,20 +1,23 @@
-"""Esquemas de un paso, Richardson y regiones de estabilidad
-Convenio: f(u, t) es el campo y scheme(f, u, delta, t) avanza un paso de tamaño delta"""
+"""Capa algorítmica: Newton, esquemas de un paso, integración, orden y error (Richardson) y regiones de estabilidad
+
+Convenio: f(u, t) es el campo y scheme(f, u, dt, t) avanza un paso de tamaño dt"""
 
 from __future__ import annotations
 
-from typing import Callable, NamedTuple, Union
+from collections.abc import Callable
+from typing import NamedTuple, Union
 
 import numpy as np
-import numpy.typing as npt
 from numpy.linalg import norm
+from numpy.typing import NDArray
 
-Array = npt.NDArray[np.float64]
-Field = Callable[[Array, float], Array]
-Step = Callable[..., Array]
-Amplification = Callable[[complex], complex]
-Component = Union[slice, list[int]]               # columnas del estado que se miran
-Range = tuple[float, float]
+Array = NDArray[np.float64]
+VectorMap = Callable[[Array], Array]             # función de vector a vector, F(Y)
+Field = Callable[[Array, float], Array]          # campo f(u, t)
+Step = Callable[..., Array]                      # esquema scheme(f, u, dt, t, ...); los implícitos admiten más
+Amplification = Callable[[complex], complex]     # factor de amplificación R(z)
+Component = Union[slice, list[int]]              # columnas del estado que se miran
+Range = tuple[float, float]                      # intervalo (mín, máx)
 
 
 # ============================================================== 1. esquemas de un paso
@@ -24,16 +27,15 @@ def euler(f: Field, u: Array, delta: float, t: float) -> Array:
     return u + delta * f(u, t)
 
 
-def my_jacobian(F: Callable[[Array], Array], Y: Array, eps: float = 1e-7, F0: Array | None = None) -> Array:
-    """Jacobiana de F en Y por diferencias hacia delante; F0 = F(Y) opcional"""
-    if F0 is None:
-        F0 = F(Y)
+def my_jacobian(F: VectorMap, Y: Array, eps: float = 6e-6) -> Array:
+    """Jacobiana de F en Y por diferencias centradas, de orden 2 (error del orden de h^2)"""
     J = np.empty((Y.size, Y.size))
     for j in range(Y.size):
-        h = eps * max(1.0, abs(Y[j]))
-        Yh = Y.copy()
-        Yh[j] += h
-        J[:, j] = (F(Yh) - F0) / h
+        h = eps * max(1.0, abs(Y[j]))      # paso relativo si |Y[j]| > 1, para que no se pierda al sumarlo
+        Yp, Ym = Y.copy(), Y.copy()
+        Yp[j] += h
+        Ym[j] -= h
+        J[:, j] = (F(Yp) - F(Ym)) / (2 * h)  # columna j: derivada de F respecto a Y[j]
     return J
 
 
@@ -42,7 +44,7 @@ def my_newton(F: Callable[[Array], Array], Y: Array, tol: float, max_iter: int,
     """Newton para F(Y) = 0 (dF exacta o por diferencias); ArithmeticError si diverge, RuntimeError si no converge"""
     for _ in range(max_iter):
         F0 = F(Y)
-        J = my_jacobian(F, Y, F0=F0) if dF is None else dF(Y)
+        J = my_jacobian(F, Y) if dF is None else dF(Y)
         dY = np.linalg.solve(J, -F0)
         Y = Y + dY
         if not np.all(np.isfinite(Y)):

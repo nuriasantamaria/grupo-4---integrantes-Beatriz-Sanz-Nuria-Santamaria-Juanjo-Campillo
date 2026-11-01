@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from typing import Any, Sequence
 
+from numpy.typing import ArrayLike
 from PySide6 import QtCore, QtWidgets
 
 from simulation import SimConfig
-from space_physics import Array, ArrayLike
+from space_physics import Array
 
 from visualization.geometry import inertia_ranks, triangle_violation
 from visualization.initial_conditions import axis_decomposition, omega_from_axis, reassign_axes

@@ -1,115 +1,111 @@
-"""¿Cuáles son las ecuaciones? Momentos de inercia, Euler, invariantes T y L² y el campo f(u, t) del sólido
+"""
+Ecuaciones que rigen la física. Momentos de inercia, Euler, invariantes T y |L|^2 y el campo f(u, t) del sistema.
 
-No importa ningún otro módulo del proyecto: es la base sobre la que se construye todo lo demás"""
+"""
 
-from typing import Callable, Sequence, Union
+from __future__ import annotations
 
 import numpy as np
-import numpy.typing as npt
+from numpy.typing import ArrayLike, NDArray
+from collections.abc import Callable
 
-# alias de tipos: los usan las clases de equilibria y errors, simulation.py y la GUI
-Array = npt.NDArray[np.float64]
-ComplexArray = npt.NDArray[np.complex128]
-ArrayLike = npt.ArrayLike
-Vec = Union[Array, Sequence[float]]    # omega, I o w0 indexable
-Amplification = Callable[[complex], complex]    # R(z) de un esquema
+Array = NDArray[np.float64]
 
+# ================ [1] INERCIA ================
 
-# ============================================================== INERTIA
+def inertia_matrix(I: ArrayLike) -> Array:
+    """Comprueba que se tengan 3 momentos de inercia, que sean positivos y finitos, y devuelve el vector de floats
+    de momentos de inercia."""
 
-def inertia_matrix(I):
-    """diag(I); ValueError si no son tres momentos finitos y positivos"""
     I = np.asarray(I, dtype=float)
-    if I.shape != (3,) or not np.all(np.isfinite(I)) or not np.all(I > 0):
+    valid = I.shape == (3,) and np.all(np.isfinite(I)) and np.all(I > 0)
+    if not valid:
         raise ValueError(f"I debe tener tres momentos principales positivos (recibido {I.tolist()})")
-    return np.diag(I)
+    return I
 
 
-def sorted_axes(I):
-    """Índices de los ejes de menor, intermedio y mayor momento de inercia"""
-    orden = np.argsort(np.asarray(I, dtype=float))
-    return int(orden[0]), int(orden[1]), int(orden[2])
+def sorted_axes(I: ArrayLike) -> tuple[int, int, int]:
+    """Índices de los ejes de menor, intermedio y mayor momento de inercia, en ese orden."""
+    i_min, i_mid, i_max = np.argsort(I, kind="stable").tolist() # I = (4.2, 7.5, 2.8) -> (2, 0, 1)
+    return i_min, i_mid, i_max
 
 
-def is_degenerate(I, tol=1e-6):
-    """True si hay al menos dos momentos iguales (simétrico o esfera)"""
-    I1, I2, I3 = np.sort(np.asarray(I, dtype=float))
-    return bool(I2 - I1 < tol or I3 - I2 < tol)
+def is_degenerate(I: ArrayLike, tol: float=1e-6) -> bool:
+    """Comprueba si el sistema es degenerado, esto es, al menos dos momentos de inercia son iguales. En ese caso
+    no hay eje intermedio y, por ende, el análisis asociado no aplica."""
+    return bool(np.diff(np.sort(I)).min() < tol)
+
+# ================ [2] DINÁMICA ================
+
+def euler_equations(omega: Array, I: Array) -> Array:
+    """Ecuaciones dinámicas de Euler para un sólido rígido girando alrededor de su centro de masas en ausencia
+    de pares de fuerzas externos. Esta función admite el omega de entrada como (3,) o (3, nx, ny) para evaluar
+    múltiples estados simultáneamente (campo de vectores)."""
+    I1, I2, I3 = I
+    w1, w2, w3 = omega
+    return np.array([(I2 - I3) / I1 * w2 * w3, (I3 - I1) / I2 * w3 * w1, (I1 - I2) / I3 * w1 * w2])
 
 
-# ============================================================== EULER (I es la matriz diagonal)
-
-def euler_equations(omega, I):
-    """Derivada de omega según Euler: dw_i/dt = (I_j - I_k) / I_i * w_j * w_k"""
-    I1, I2, I3 = I[0, 0], I[1, 1], I[2, 2]
-    w1, w2, w3 = omega[0], omega[1], omega[2]
-    return np.array([(I2 - I3) / I1 * w2 * w3,
-                     (I3 - I1) / I2 * w3 * w1,
-                     (I1 - I2) / I3 * w1 * w2])
-
-
-def jacobian_matrix(omega, I):
-    """Jacobiana de Euler respecto a omega: fila i = derivadas de dw_i/dt"""
-    I1, I2, I3 = I[0, 0], I[1, 1], I[2, 2]
+def jacobian_matrix(omega: Array, I: Array) -> Array:
+    """Matriz jacobiana analítica del sistema dinámico."""
+    I1, I2, I3 = I
+    w1, w2, w3 = omega
     c1 = (I2 - I3) / I1
     c2 = (I3 - I1) / I2
     c3 = (I1 - I2) / I3
-    w1, w2, w3 = omega[0], omega[1], omega[2]
-    return np.array([[0.0,     c1 * w3, c1 * w2],
-                     [c2 * w3, 0.0,     c2 * w1],
+    return np.array([[0.0, c1 * w3, c1 * w2],
+                     [c2 * w3, 0.0, c2 * w1],
                      [c3 * w2, c3 * w1, 0.0]])
 
+# ================ [3] INVARIANTES ================
 
-# ============================================================== INVARIANTS (omega puede ser (3,) o (n, 3))
-
-def kinetic_energy(omega, I):
-    """T = 1/2 * suma de I_i * w_i^2"""
+def kinetic_energy(omega: ArrayLike, I: ArrayLike) -> Array | float:
+    """Energía cinética rotacional instantánea del sólido rígido. Admite omega como (3,) o (n,3)."""
     omega = np.asarray(omega, dtype=float)
     I = np.asarray(I, dtype=float)
-    return 0.5 * np.sum(I * omega ** 2, axis=-1)
+    return 0.5 * np.sum(I * omega ** 2, axis=-1) # Suma sobre el último eje (componentes de omega para cada instante).
 
 
-def angular_momentum_sq(omega, I):
-    """|L|^2 = suma de (I_i * w_i)^2"""
+def angular_momentum_sq(omega: ArrayLike, I: ArrayLike) -> Array | float:
+    """Módulo al cuadrado del momento angular instantáneo. Admite omega como (3,) o (n,3)."""
     omega = np.asarray(omega, dtype=float)
     I = np.asarray(I, dtype=float)
-    return np.sum((I * omega) ** 2, axis=-1)
+    return np.sum((I * omega) ** 2, axis=-1) # Suma sobre el último eje (componentes de omega para cada instante).
 
 
-def conserved_quantities(w0, I):
-    """(T, |L|) del estado inicial: la referencia que debe conservarse"""
+def conserved_quantities(w0: ArrayLike, I: ArrayLike) -> tuple[float, float]:
+    """Invariantes T y |L| correspondientes a la condición inicial."""
     T = float(kinetic_energy(w0, I))
     L = float(np.sqrt(angular_momentum_sq(w0, I)))
     return T, L
 
 
-
-
-def omega_bound(I, w0):
-    """Cota de |omega| en la órbita exacta: 2T = Σ Iᵢωᵢ² ≥ I_min·‖ω‖²  →  ‖ω‖ ≤ √(2T/I_min)"""
+def omega_bound(I: ArrayLike, w0: ArrayLike) -> float:
+    """Cota de |omega| en la órbita exacta: |w| <= sqrt(2T/I_min). Es el semieje mayor del elipsoide de energía.
+    Proviene de la desigualdad siguiente: 2T = sum(I_i * w_i^2) >= I_min * |w|^2 """
     I = np.asarray(I, dtype=float)
     twoT = 2.0 * kinetic_energy(w0, I)
     return float(np.sqrt(twoT / np.min(I)))
 
+# ================ [4] SÓLIDO RÍGIDO ================
 
-# ============================================================== RIGID BODY: u = (w1, w2, w3, q0, q1, q2, q3)
-
-def rigid_body_rhs(u, I_mat):
-    """Derivada de u: Euler para omega y q' = 1/2 * q ⊗ (0, omega) para el cuaternión"""
+def rigid_body_rhs(u: Array, I: Array) -> Array:
+    """Para el sólido rígido, el vector de estado es u = (w, q). La evolución q' completa du/dt = f(u,t).
+    (q0, q1, q2, q3) = [cos(theta/2), nx*sin(theta/2), ny*sin(theta/2), nz*sin(theta/2)], con n el eje de giro."""
     w1, w2, w3, q0, q1, q2, q3 = u
-    dw = euler_equations(u[:3], I_mat)
-    dq0 = 0.5 * (-q1 * w1 - q2 * w2 - q3 * w3)
-    dq1 = 0.5 * (q0 * w1 + q2 * w3 - q3 * w2)
-    dq2 = 0.5 * (q0 * w2 + q3 * w1 - q1 * w3)
-    dq3 = 0.5 * (q0 * w3 + q1 * w2 - q2 * w1)
-    return np.array([dw[0], dw[1], dw[2], dq0, dq1, dq2, dq3])
+    dw = euler_equations(u[:3], I)
+    dq0 = 0.5 * (-q1 * w1 - q2 * w2 - q3 * w3) # -1/2 * (q_vec dot omega)
+    dq1 = 0.5 * (q0 * w1 + q2 * w3 - q3 * w2) # 1/2 * (q0 * omega + q_vec x omega), componente 1
+    dq2 = 0.5 * (q0 * w2 + q3 * w1 - q1 * w3) # 1/2 * (q0 * omega + q_vec x omega), componente 2
+    dq3 = 0.5 * (q0 * w3 + q1 * w2 - q2 * w1) # 1/2 * (q0 * omega + q_vec x omega), componente 3
+    return np.array([*dw, dq0, dq1, dq2, dq3])
 
 
-def rigid_body_jacobian(u, I_mat):
-    """Jacobiana 7x7 de rigid_body_rhs, con el mismo orden de u"""
+def rigid_body_jacobian(u: Array, I: Array) -> Array:
+    """Jacobiana 7x7 del sistema rigid_body_rhs, con la misma dimensión y orden de u."""
     w1, w2, w3, q0, q1, q2, q3 = u
-    J = np.zeros((7, 7))
-    J[0:3, 0:3] = jacobian_matrix(u[:3], I_mat)
+    J = np.zeros((7, 7)) # El bloque superior derecho es nulo (omega no depende de q, pero sí al revés).
+    J[0:3, 0:3] = jacobian_matrix(u[:3], I)
     J[3:7, 0:3] = 0.5 * np.array([[-q1, -q2, -q3],
                                   [q0, -q3, q2],
                                   [q3, q0, -q1],
@@ -121,24 +117,27 @@ def rigid_body_jacobian(u, I_mat):
     return J
 
 
-def make_rhs(I):
-    """f(u, t) del sólido de momentos I, listo para los integradores (I se valida una vez)"""
-    I_mat = inertia_matrix(I)
+def make_rhs(I: ArrayLike) -> Callable[[Array, float], Array]:
+    """Lado derecho f(u, t) del sólido rígido de momentos I, listo para los integradores. I se valida una vez. Esto
+    es necesario porque el motor numérico es genérico; llama a f(u, t) sin conocer I."""
+    inertia = inertia_matrix(I)
 
-    def f(u, t):                      # t: lo exige el motor; el sólido libre no lo usa
-        return rigid_body_rhs(u, I_mat)
+    def f(u: Array, t: float) -> Array: # Genérico, aunque los SDA no dependen explícitamente de t.                 
+        return rigid_body_rhs(u, inertia) # Llama con un valor ya fijado de I.
     return f
 
 
-def make_jacobian(I):
-    """J(u, t) = df/du del sólido de momentos I, pareja exacta de make_rhs"""
-    I_mat = inertia_matrix(I)
+def make_jacobian(I: ArrayLike) -> Callable[[Array, float], Array]:
+    """J(u, t) = df/du del sólido de momentos I. Adapta el formato al esperado por los integradores, validando
+    I una vez."""
+    inertia = inertia_matrix(I)
 
-    def J(u, t):
-        return rigid_body_jacobian(u, I_mat)
+    def J(u: Array, t:float) -> Array: # Genérico, aunque los SDA no dependen explícitamente de t.  
+        return rigid_body_jacobian(u, inertia) # Llama con un valor ya fijado de I.
     return J
 
 
-def initial_state(w0):
-    """Estado inicial (w0, q = 1, 0, 0, 0): el sólido empieza sin girar"""
-    return np.array([*np.asarray(w0, dtype=float), 1.0, 0.0, 0.0, 0.0])
+def initial_state(w0: ArrayLike) -> Array:
+    """Estado inicial (w0, q). El sólido aún no ha rotado, pero sí tiene velocidad de giro inicial."""
+    q_identity = [1.0, 0.0, 0.0, 0.0] # Cuaternión identidad (orientación antes de rotar).
+    return np.concatenate([np.asarray(w0, dtype=float), q_identity])

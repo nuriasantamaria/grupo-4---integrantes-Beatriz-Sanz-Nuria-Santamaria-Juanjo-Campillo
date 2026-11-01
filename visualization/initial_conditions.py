@@ -6,8 +6,9 @@ import math
 from typing import Sequence, TypedDict
 
 import numpy as np
+from numpy.typing import ArrayLike
 
-from space_physics import angular_momentum_sq, ArrayLike, kinetic_energy
+from space_physics import angular_momentum_sq, kinetic_energy
 
 
 # ---- edicion de las condiciones iniciales y comparacion de problemas

@@ -5,9 +5,10 @@ from __future__ import annotations
 from typing import Any
 
 import numpy as np
+from numpy.typing import ArrayLike
 import pyqtgraph.opengl as gl
 
-from space_physics import Array, ArrayLike
+from space_physics import Array
 
 from visualization.theme import rgba
 

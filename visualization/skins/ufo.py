@@ -6,9 +6,10 @@ import math
 from typing import Any, Sequence, Union
 
 import numpy as np
+from numpy.typing import ArrayLike
 from PySide6 import QtGui
 
-from space_physics import Array, ArrayLike
+from space_physics import Array
 
 from visualization.skins.meshes import (blob, IntArray, lathe, orient_out, Rig, rot_axis, slab, smooth_path,
                                         smoothstep, tube)
