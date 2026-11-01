@@ -2,8 +2,7 @@
 Se puede ejecutar con `python test_richardson.py` o con pytest."""
 import numpy as np
 
-from numerical_engine.numerical_engine import (runge_kutta_4, final_state, richardson_error,
-                              richardson_extrapolation, scheme_order)
+from numerical_engine import final_state, richardson_error, richardson_extrapolation, runge_kutta_4, scheme_order
 
 f_test = lambda u, t: -u
 EXACTA = np.exp(-1.0)

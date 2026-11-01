@@ -18,11 +18,11 @@ import numpy as np
 from numpy.typing import ArrayLike
 
 import simulation.divergence as dv
-import numerical_engine.numerical_engine as ne
+from simulation.error_analysis import Convergence, LinearErrors, convergence_study, linear_step_errors
+import numerical_engine as ne
 from numerical_engine.numerical_engine import Array
-from space_physics import (Convergence, EulerExact, LinearErrors, conservation_drift, conserved_quantities,
-                           convergence_study, initial_state, make_jacobian, make_rhs, omega_bound,
-                           linear_step_errors)
+from space_physics import (EulerExact, conservation_drift, conserved_quantities, initial_state, make_jacobian,
+                           make_rhs, omega_bound)
 
 MAX_PREVIEW_STEPS = 300_000
 MAX_LIVE_STEPS = 1_000_000

@@ -9,8 +9,10 @@ from typing import TypedDict
 import numpy as np
 from numpy.typing import ArrayLike
 
-from space_physics import (EulerExact, is_degenerate, kinetic_energy, LinearErrors, noise_floor,
-                           predicted_errors, separatrix_side, SEPARATRIX_TOL, surrounded_axis)
+from numerical_engine import noise_floor
+from simulation import LinearErrors, predicted_errors
+from space_physics import (EulerExact, is_degenerate, kinetic_energy, separatrix_side, SEPARATRIX_TOL,
+                           surrounded_axis)
 
 from visualization.cells import dot
 from visualization.geometry import exact_orbit

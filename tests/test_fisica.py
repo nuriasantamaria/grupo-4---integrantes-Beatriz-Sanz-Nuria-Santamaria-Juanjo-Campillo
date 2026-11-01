@@ -18,10 +18,11 @@ import space_physics as sp
 from visualization import geometry, initial_conditions, plot_tools, scenarios, verdicts  # sin Qt
 
 try:
-    import numerical_engine.numerical_engine as ne
+    import numerical_engine as ne
     import simulation.divergence as dv
+    import simulation.error_analysis as ea
 except Exception:               # pragma: no cover
-    ne = dv = None              # type: ignore[assignment]
+    ne = dv = ea = None              # type: ignore[assignment]
 
 
 def euler_matches_exact(I):
@@ -168,7 +169,7 @@ def test_teoria_lineal_por_paso():
     R = {"euler": lambda z: 1 + z, "be": lambda z: 1 / (1 - z), "cn": lambda z: (1 + z / 2) / (1 - z / 2),
          "rk4": lambda z: 1 + z + z ** 2 / 2 + z ** 3 / 6 + z ** 4 / 24}
     I, w0, dt = (1, 2, 3), (2.0, 0.08, 0.08), 0.02
-    lin = {k: sp.linear_step_errors(I, w0, f, dt) for k, f in R.items()}
+    lin = {k: ea.linear_step_errors(I, w0, f, dt) for k, f in R.items()}
     z = lin["euler"]["beta"] * dt
     assert abs(lin["euler"]["dmod"] - (math.sqrt(1 + z * z) - 1)) < 1e-14 and lin["euler"]["dmod"] > 0
     assert lin["be"]["dmod"] < 0 and abs(lin["cn"]["dmod"]) < 1e-14
@@ -177,16 +178,16 @@ def test_teoria_lineal_por_paso():
     assert abs(lin["rk4"]["dphase"] / (-z ** 5 / 120) - 1) < 0.02 and abs(lin["rk4"]["dmod"] / (-z ** 6 / 144) - 1) < 0.02
     assert all(v["dphase"] < 0 for v in lin.values()), "todos los esquemas retrasan la fase"
     I_, w_ = separatriz(1)
-    assert sp.linear_step_errors(I_, w_, R["rk4"], dt) is None, "sobre la separatriz no hay centro lineal"
+    assert ea.linear_step_errors(I_, w_, R["rk4"], dt) is None, "sobre la separatriz no hay centro lineal"
 
 
 def test_relevancia_del_error():
-    assert sp.noise_floor(10_000) > sp.noise_floor(100) > 5e-15
+    assert ne.noise_floor(10_000) > ne.noise_floor(100) > 5e-15
     assert verdicts.grade(1e-17, 1e-13, 1e-6) == 0 and verdicts.grade(1e-9, 1e-13, 1e-6) == 1 and verdicts.grade(1e-3, 1e-13, 1e-6) == 2
 
 
 def test_convergencia_con_integradores_propios():
-    """convergence_study con Euler (p = 1) y RK4 (p = 4) escritos aquí: no depende de numerical_engine."""
+    """convergence_study con Euler (p = 1) y RK4 (p = 4) escritos aquí: no usa los esquemas de numerical_engine."""
     I, w0 = (1, 2, 3), (2.0, 0.3, 0.3)
 
     def integrar(paso, h, n):
@@ -200,7 +201,7 @@ def test_convergencia_con_integradores_propios():
         k1 = rhs3(I_, w); k2 = rhs3(I_, w + h / 2 * k1); k3 = rhs3(I_, w + h / 2 * k2); k4 = rhs3(I_, w + h * k3)
         return w + h / 6 * (k1 + 2 * k2 + 2 * k3 + k4)
     for paso, p, dt in ((euler, 1, 0.02), (rk4, 4, 0.08)):
-        res = sp.convergence_study(I, w0, partial(integrar, paso), 10.0, dt, levels=5)
+        res = ea.convergence_study(I, w0, partial(integrar, paso), 10.0, dt, levels=5)
         assert res["ok"].sum() >= 3 and abs(res["p"] - p) < 0.2, f"p = {res['p']:.2f}, esperado {p}"
 
 
@@ -243,7 +244,7 @@ def test_motor_ordenes_de_convergencia():
     nominal = {"euler": 1, "be": 1, "cn": 2, "rk4": 4}
     for clave, p in nominal.items():
         dt = 0.08 if p == 4 else 0.04
-        res = sp.convergence_study(I, w0, lambda h, n, c=clave: _integrar(c, I, w0, h, n), 10.0, dt, levels=5)
+        res = ea.convergence_study(I, w0, lambda h, n, c=clave: _integrar(c, I, w0, h, n), 10.0, dt, levels=5)
         assert res["ok"].sum() >= 2 and abs(res["p"] - p) < 0.35, \
             f"{M[clave]}: orden observado {res['p']:.2f}, esperado {p} (errores {res['err']})"
 
@@ -257,8 +258,8 @@ def test_motor_errores_de_modulo_y_fase_siguen_la_teoria_lineal():
         Y = _integrar(clave, I, w0, dt, n)
         ex = sp.EulerExact(np.array(I, float), np.array(w0, float))
         r, psi, _ = ex.error_parts(t, Y[:, :3], reset=True)
-        lin = sp.linear_step_errors(I, w0, ampl[clave], dt)
-        r_th, psi_th = sp.predicted_errors(lin, n)
+        lin = ea.linear_step_errors(I, w0, ampl[clave], dt)
+        r_th, psi_th = ea.predicted_errors(lin, n)
         if abs(r_th) > 1e-9:
             assert abs(r[-1] / r_th - 1) < 0.15, f"{M[clave]} módulo: medido {r[-1]:+.2e}, teoría {r_th:+.2e}"
         assert abs(psi[-1] / psi_th - 1) < 0.15, f"{M[clave]} fase: medida {psi[-1]:+.3e}°, teoría {psi_th:+.3e}°"
@@ -445,9 +446,9 @@ def test_muestreo_de_la_solucion_exacta_y_comparacion_de_problemas():
 
 def test_equilibrio_efecto_del_esquema_en_el_eje_del_plano():
     R = lambda z: 1 + z
-    r = sp.equilibrium_amplification((1, 2, 3), (2.0, 0.3, 0.3), 0, R, 0.05)
+    r = ea.equilibrium_amplification((1, 2, 3), (2.0, 0.3, 0.3), 0, R, 0.05)
     assert r["type"] == "centro" and r["R"] > 1 and abs(r["R"] - abs(1 + r["lam"] * 0.05)) < 1e-15
-    assert sp.equilibrium_amplification((1, 1, 3), (1, 0.3, 0.2), 0, R, 0.05) is None
+    assert ea.equilibrium_amplification((1, 1, 3), (1, 0.3, 0.2), 0, R, 0.05) is None
     assert len(sp.relevant_eigenvalues((1, 2, 3), (2.0, 0.3, 0.3))) == 2
     lin_sep = sp.relevant_eigenvalues(*separatriz(1))           # sobre la separatriz: eje intermedio (silla, ±μ reales)
     assert len(lin_sep) == 2 and np.allclose(lin_sep.imag, 0)
@@ -503,10 +504,10 @@ def test_campo_de_direcciones_y_actitud():
 
 def test_tendencia_y_resolucion_del_paso():
     assert (verdicts.amplitude_trend(1e-3), verdicts.amplitude_trend(-1e-3), verdicts.amplitude_trend(0.0)) == ("crece", "decae", "se conserva")
-    lin = sp.linear_step_errors((1, 2, 3), (2.0, 0.3, 0.3), lambda z: 1 + z, 0.05)
+    lin = ea.linear_step_errors((1, 2, 3), (2.0, 0.3, 0.3), lambda z: 1 + z, 0.05)
     res = verdicts.step_resolution(lin, 0.05)
     assert not res["coarse"] and res["steps_per_cycle"] > 50
-    res = verdicts.step_resolution(sp.linear_step_errors((1, 2, 3), (2.0, 0.3, 0.3), lambda z: 1 + z, 0.3), 0.3)
+    res = verdicts.step_resolution(ea.linear_step_errors((1, 2, 3), (2.0, 0.3, 0.3), lambda z: 1 + z, 0.3), 0.3)
     assert res["coarse"]
 
 

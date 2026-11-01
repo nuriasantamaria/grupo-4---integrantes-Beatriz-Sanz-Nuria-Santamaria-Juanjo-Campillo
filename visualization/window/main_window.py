@@ -15,11 +15,11 @@ import pyqtgraph as pg
 import pyqtgraph.opengl as gl
 
 import numerical_engine as ne
-from simulation import (convergence_report, linear_errors, MAX_LIVE_STEPS, MAX_PREVIEW_STEPS,
-                        richardson_report, SimConfig, Simulation)
-from space_physics import (angular_momentum_sq, Array, equilibrium_amplification,
-                           equilibrium_analysis, EulerExact, kinetic_energy, LinearErrors, noise_floor,
-                           predicted_errors, relevant_eigenvalues)
+from numerical_engine import noise_floor
+from simulation import (convergence_report, equilibrium_amplification, linear_errors, LinearErrors, MAX_LIVE_STEPS,
+                        MAX_PREVIEW_STEPS, predicted_errors, richardson_report, SimConfig, Simulation)
+from space_physics import (angular_momentum_sq, Array, equilibrium_analysis, EulerExact, kinetic_energy,
+                           relevant_eigenvalues)
 
 from visualization import theme
 from visualization.cells import DASH, dot, num_or_dash

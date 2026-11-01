@@ -40,9 +40,8 @@ flowchart TD
     end
 
     subgraph PHYS["ampli/space_physics/"]
-        MODEL["model.py<br/>make_rhs (Euler + quaternion),<br/>make_jacobian, initial_state,<br/>conserved_quantities, omega_bound"]
+        MODEL["model.py<br/>make_rhs (Euler + quaternion),<br/>make_jacobian, initial_state,<br/>conserved_quantities, omega_bound,<br/>conservation_drift"]
         EXACT["exact.py<br/>EulerExact (Jacobi elliptic)<br/>error_parts: modulus, phase, lag"]
-        ERRS["errors.py<br/>conservation_drift"]
     end
 
     subgraph ENG["ampli/numerical_engine/"]
@@ -66,7 +65,7 @@ flowchart TD
     STOPQ -- "done" --> DIVFIRST
     DIVFIRST -- "diverged → trim, freeze" --> HIST
     DIVFIRST -- "ok" --> HIST
-    HIST --> ERRS
+    HIST --> MODEL
     HIST --> EXACT
     HIST --> DRAW --> LOOP
 ```
@@ -95,16 +94,18 @@ flowchart TD
         S_INIT["__init__.py"]
         S_SIM["simulation.py"]
         S_DIV["divergence.py"]
+        S_ERR["error_analysis.py"]
     end
 
     subgraph ENG["ampli/numerical_engine/"]
         E_INIT["__init__.py"]
+        E_RICH["richardson.py"]
+        E_STAB["stability.py"]
         E_NE["numerical_engine.py"]
     end
 
     subgraph PHYS["ampli/space_physics/"]
         P_INIT["__init__.py"]
-        P_ERR["errors.py"]
         P_EQ["equilibria.py"]
         P_EX["exact.py"]
         P_MOD["model.py"]
@@ -127,19 +128,25 @@ flowchart TD
 
     S_INIT --> S_SIM
     S_INIT --> S_DIV
+    S_INIT --> S_ERR
     S_SIM --> S_DIV
+    S_SIM --> S_ERR
     S_SIM --> E_INIT
     S_SIM --> P_INIT
     S_DIV --> E_INIT
     S_DIV --> P_INIT
+    S_ERR --> E_INIT
+    S_ERR --> P_INIT
 
-    E_INIT --> E_NE
+    E_INIT --> E_NE & E_RICH & E_STAB
+    E_RICH --> E_NE
+    E_STAB --> E_NE
 
-    P_INIT --> P_ERR & P_EQ & P_EX & P_MOD
-    P_ERR --> P_EQ --> P_MOD
-    P_ERR --> P_EX --> P_MOD
+    P_INIT --> P_EQ & P_EX & P_MOD
+    P_EQ --> P_MOD
+    P_EX --> P_MOD
 
-    T_FIS -.-> P_INIT & E_NE & S_DIV & V_PURE
+    T_FIS -.-> P_INIT & E_INIT & S_DIV & S_ERR & V_PURE
     T_SIM -.-> S_INIT & E_INIT & P_INIT
     T_RICH -.-> E_INIT
 ```
@@ -199,7 +206,7 @@ flowchart TD
 ## Notes
 
 - **Analysis branches outside the live loop.** `visualization/window/main_window.py` also calls `simulation/simulation.py` for `run_preview` (background `PreviewWorker` in `visualization/workers.py`), `richardson_report` and `convergence_report` (`AnalysisWorker`).
-- **Analysis panels.** `visualization/window/main_window.py` and `visualization/verdicts.py` call `space_physics/equilibria.py` (equilibria, eigenvalues, separatrix) and `space_physics/errors.py` (linear error theory) directly. These depend only on I and ω₀, not on the integrated trajectory, so they are outside the `_tick` cycle.
+- **Analysis panels.** `visualization/window/main_window.py` and `visualization/verdicts.py` call `space_physics/equilibria.py` (equilibria, eigenvalues, separatrix) and `simulation/error_analysis.py` (linear error theory) directly. These depend only on I, ω₀ and the scheme, not on the integrated trajectory, so they are outside the `_tick` cycle.
 - **Callbacks, not imports.** At runtime the engine calls back into physics (`f`, `jac`) and into `divergence` (`stop`). It receives these as functions built by `simulation/simulation.py` and never imports those modules.
 - **Fonts.** `visualization/theme.py` chooses `UI_FONT` and `MONO` in `setup_fonts()` once the Qt application exists; other modules read them as `theme.UI_FONT` / `theme.MONO`.
 - **Tests.** Run them from the root as modules: `python -m tests.test_fisica`, `python -m tests.test_simulation`, `python -m tests.test_richardson`.

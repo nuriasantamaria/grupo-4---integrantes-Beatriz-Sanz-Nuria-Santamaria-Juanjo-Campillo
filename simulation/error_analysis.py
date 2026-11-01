@@ -1,19 +1,18 @@
-"""Error cometido por el esquema numérico. Error previsto (teoría lineal), medido (deriva, convergencia) y ruido 
-de redondeo."""
+"""Error de los esquemas sobre el sólido: previsto por la teoría lineal y medido en el estudio de convergencia.
+
+Une los autovalores y la solución exacta (`space_physics`) con R(z) y el ruido de redondeo (`numerical_engine`)."""
 
 from __future__ import annotations
 
 import math
-from collections.abc import Callable
 from typing import TypedDict
 
 import numpy as np
 import numpy.typing as npt
-from numpy.typing import ArrayLike, NDArray
 
-from space_physics.equilibria import equilibrium_analysis, surrounded_axis, dominant_eigenvalue
-from space_physics.exact import EulerExact
-from space_physics.model import Array, angular_momentum_sq, is_degenerate, kinetic_energy
+from numerical_engine import noise_floor
+from space_physics import (Array, EulerExact, dominant_eigenvalue, equilibrium_analysis, is_degenerate,
+                           kinetic_energy, surrounded_axis)
 
 
 class LinearErrors(TypedDict):
@@ -43,15 +42,6 @@ class Convergence(TypedDict):
     local: Array                # pendiente entre niveles consecutivos
 
 
-# ============================================================== DRIFT (error medido en los invariantes)
-
-def conservation_drift(W, I, T0, L0):
-    """(error de T, error de |L|) de la trayectoria W (n, 3) respecto a T0 y L0 (de conserved_quantities)"""
-    dT = kinetic_energy(W, I) - T0
-    dL = np.sqrt(angular_momentum_sq(W, I)) - L0
-    return dT, dL
-
-
 # ============================================================== LINEAR THEORY
 
 
@@ -77,12 +67,6 @@ def equilibrium_amplification(I, w0, k, amplification, dt):
     kind = equilibrium_analysis(I, twoT)[k]["type"]
     lam = dominant_eigenvalue(I, twoT, k)
     return {"type": kind, "lam": lam, "R": float(abs(amplification(lam * dt)))}
-
-
-def noise_floor(n_steps):
-    """Error de módulo indistinguible del redondeo acumulado tras n_steps pasos (crece como √n)"""
-    eps = np.finfo(float).eps                          # precisión relativa de un float (2.2e-16)
-    return float(50.0 * eps * math.sqrt(max(n_steps, 1)))
 
 
 def predicted_errors(lin, n):

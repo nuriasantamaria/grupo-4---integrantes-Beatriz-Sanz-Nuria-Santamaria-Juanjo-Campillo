@@ -122,7 +122,7 @@ def test_run_each_aisla_los_fallos_y_respeta_los_desactivados():
 
 
 def test_jacobiana_exacta_del_campo_y_newton_con_ella():
-    import numerical_engine.numerical_engine as ne
+    import numerical_engine as ne
     import space_physics as sp
     I = np.array([1.0, 2.0, 3.0])
     f, J = sp.make_rhs(I), sp.make_jacobian(I)

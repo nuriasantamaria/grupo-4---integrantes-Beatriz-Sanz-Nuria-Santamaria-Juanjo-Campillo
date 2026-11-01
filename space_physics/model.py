@@ -87,6 +87,12 @@ def omega_bound(I: ArrayLike, w0: ArrayLike) -> float:
     twoT = 2.0 * kinetic_energy(w0, I)
     return float(np.sqrt(twoT / np.min(I)))
 
+def conservation_drift(W: ArrayLike, I: ArrayLike, T0: float, L0: float) -> tuple[Array | float, Array | float]:
+    """Error de T y de |L| de la trayectoria W (n, 3) respecto a T0 y L0 (de conserved_quantities)."""
+    dT = kinetic_energy(W, I) - T0
+    dL = np.sqrt(angular_momentum_sq(W, I)) - L0
+    return dT, dL
+
 # ================ [4] SÓLIDO RÍGIDO ================
 
 def rigid_body_rhs(u: Array, I: Array) -> Array:
