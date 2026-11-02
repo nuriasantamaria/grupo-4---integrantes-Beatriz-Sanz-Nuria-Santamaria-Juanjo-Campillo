@@ -8,7 +8,7 @@ from typing import NamedTuple
 import numpy as np
 from numpy.linalg import norm
 
-from numerical_engine.numerical_engine import Array, Component, Field, Step, cauchy_problem
+from numerical_engine.numerical_engine import Array, Component, Field, Step, cauchy_problem, noise_floor
 
 
 def _check_richardson(T: float, N: int, p: float) -> None:
@@ -29,7 +29,7 @@ def final_state(scheme: Step, f: Field, u0: Array, T: float, N: int, t0: float =
 
 def _rounding_floor(n_steps: int, u: Array) -> float:
     """Umbral de ruido de redondeo para diferencias entre mallas tras n_steps pasos"""
-    return float(50 * np.finfo(float).eps * np.sqrt(n_steps) * max(1.0, float(norm(u))))
+    return noise_floor(n_steps) * max(1.0, float(norm(u)))
 
 
 def scheme_order(scheme: Step, f: Field, u0: Array, T: float, N: int,

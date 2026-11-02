@@ -20,7 +20,7 @@ class Equilibrium(TypedDict):
     stability: str         # 'estable' | 'marginal' | 'inestable' (lineal)
     nonlinear: str         # 'estable' | 'inestable' | 'neutro' (con T y |L|^2)
 
-# ================ [1] EQUILIBRIO ================
+# ================ [1] EQUILIBRIOS ================
 
 def principal_equilibria(I: ArrayLike, twoT: float) -> Array:
     """Cada fila k es una rotación pura sobre el eje k con energía 2T: omega = sqrt(2T/I_k) * e_k"""
@@ -57,7 +57,7 @@ def equilibrium_analysis(I: ArrayLike, twoT: float) -> list[Equilibrium]:
             kind, stability = "punto de silla", "inestable"
         else:                                      # Si todos los autovalores tienen parte real despreciable.
             kind, stability = "centro", "marginal"
-        # Análisisno lineal: Lyapunov con T y L^2. Eje extremo estable, intermedio inestable, empate neutro.
+        # Análisis no lineal: Lyapunov con T y L^2. Eje extremo estable, intermedio inestable, empate neutro.
         others = np.delete(I, k) # Se elimina el momento de este eje para comparar con los otros dos ejes.
         if twoT <= 0:                               
             nonlinear = "neutro"
@@ -96,14 +96,14 @@ def surrounded_axis(I: ArrayLike, w0: ArrayLike, tol: float = SEPARATRIX_TOL) ->
     i_min, _, i_max = sorted_axes(I)
     return i_max if side > 0 else i_min
 
-# ================ [3] AUTOVALORES CARACTERÍSTICOS # ================
+# ================ [3] AUTOVALORES CARACTERÍSTICOS  ================
 
 def relevant_eigenvalues(I: ArrayLike, w0: ArrayLike) -> ComplexArray:
     """Autovalores no nulos del equilibrio que rodea la órbita o, en separatriz o simétrico, del eje intermedio."""
     k = surrounded_axis(I, w0)
     if k is None:
         k = sorted_axes(I)[1]
-    lam = analytic_eigenvalues(I, 2 * float(kinetic_energy(w0, I)))[k]
+    lam: ComplexArray = analytic_eigenvalues(I, 2 * float(kinetic_energy(w0, I)))[k]
     return lam[np.abs(lam) > 1e-12]
 
 

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Callable
-
 import numpy as np
 from numpy.typing import NDArray
 
@@ -94,7 +92,7 @@ def level_curve(x: Array, y: Array, A: Array, level: float = 1.0) -> tuple[Array
     return np.concatenate(out[0::2]), np.concatenate(out[1::2])
 
 
-def stability_contour(amplification: Callable[[Array], Array], re: Range, im: Range,
+def stability_contour(amplification: ne.Amplification, re: Range, im: Range,
                       n: int = 301) -> tuple[Array, Array, NDArray[np.bool_], tuple[float, float, float, float]]:
     """Frontera |R(z)| = 1, máscara |R| <= 1 y rectángulo (x0, y0, ancho, alto) de la ventana"""
     x, y, A = ne.stability_grid(amplification, re, im, n)

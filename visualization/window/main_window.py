@@ -1675,13 +1675,13 @@ class MainWindow(QtWidgets.QMainWindow):
             if amp is None:
                 rows.append(head + "—")
                 continue
-            R = amp["R"]
+            absR = amp["absR"]
             if amp["type"] == "centro":
-                g = R - 1
+                g = absR - 1
                 what = amplitude_trend(g)
                 rows.append(head + f"<span style='font-family:{theme.MONO}'>|R|−1 = {g:+.2e}</span> · amplitud {what}")
             else:
-                rows.append(head + f"<span style='font-family:{theme.MONO}'>|R(λΔt)| = {R:.4f}</span>")
+                rows.append(head + f"<span style='font-family:{theme.MONO}'>|R(λΔt)| = {absR:.4f}</span>")
         self.plane_info.setText("<br><br>".join(rows))
     def _refresh_phase_plane(self) -> None:
         """Actualiza la estela y la cabeza de cada simulación en la carta"""

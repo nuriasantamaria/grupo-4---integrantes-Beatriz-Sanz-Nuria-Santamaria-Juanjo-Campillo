@@ -447,7 +447,7 @@ def test_muestreo_de_la_solucion_exacta_y_comparacion_de_problemas():
 def test_equilibrio_efecto_del_esquema_en_el_eje_del_plano():
     R = lambda z: 1 + z
     r = ea.equilibrium_amplification((1, 2, 3), (2.0, 0.3, 0.3), 0, R, 0.05)
-    assert r["type"] == "centro" and r["R"] > 1 and abs(r["R"] - abs(1 + r["lam"] * 0.05)) < 1e-15
+    assert r["type"] == "centro" and r["absR"] > 1 and abs(r["absR"] - abs(1 + r["lam"] * 0.05)) < 1e-15
     assert ea.equilibrium_amplification((1, 1, 3), (1, 0.3, 0.2), 0, R, 0.05) is None
     assert len(sp.relevant_eigenvalues((1, 2, 3), (2.0, 0.3, 0.3))) == 2
     lin_sep = sp.relevant_eigenvalues(*separatriz(1))           # sobre la separatriz: eje intermedio (silla, ±μ reales)
@@ -578,6 +578,18 @@ def test_estabilidad_del_eje_intermedio_frente_a_los_extremos():
     assert verdicts.max_deviation(I, (2.0, 0.01, 0.01)) < 1.0
     assert "inestable" in verdicts.orbit_stability(I, (0.01, 2.0, 0.01))[0]      # sobre la separatriz también
 
+def test_R_descubierta_coincide_con_la_formula_teorica():
+    """R(z) sacada del propio paso de cada esquema coincide con su fórmula cerrada en una malla del plano z."""
+    teoria = {"euler": lambda z: 1 + z,
+              "be":    lambda z: 1 / (1 - z),
+              "cn":    lambda z: (1 + z / 2) / (1 - z / 2),
+              "rk4":   lambda z: 1 + z + z ** 2 / 2 + z ** 3 / 6 + z ** 4 / 24}
+    z = np.linspace(-4.0, 3.0, 70)[:, None] + 1j * np.linspace(-3.5, 3.5, 70)[None, :]   # 70 puntos: no pisa los polos
+    for k, s in ne.SCHEMES.items():
+        R = s.amplification(z)
+        assert R.shape == z.shape, M[k]
+        assert np.allclose(R, teoria[k](z), rtol=1e-12, atol=0), M[k]
+    assert np.isinf(ne.SCHEMES["be"].amplification(1.0)) and np.isinf(ne.SCHEMES["cn"].amplification(2.0)), "polos"
 
 def main():
     pruebas = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_") and callable(f)]

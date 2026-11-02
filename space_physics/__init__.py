@@ -9,7 +9,6 @@ from space_physics.equilibria import (SEPARATRIX_TOL, Equilibrium, analytic_eige
                                 principal_equilibria, separatrix_side, surrounded_axis, relevant_eigenvalues,
                                 dominant_eigenvalue)
 from space_physics.exact import SEP_M, EulerExact, ellip_F, ellip_K, jacobi
-from space_physics.model import (Array, angular_momentum_sq, conservation_drift,
-                           conserved_quantities, euler_equations, inertia_matrix, initial_state, is_degenerate,
-                           jacobian_matrix, kinetic_energy, make_jacobian, make_rhs, omega_bound, rigid_body_jacobian,
-                           rigid_body_rhs, sorted_axes)
+from space_physics.model import (Array, angular_momentum_sq, conserved_quantities, euler_equations, inertia_matrix, 
+                           initial_state, is_degenerate, jacobian_matrix, kinetic_energy, make_jacobian, make_rhs, 
+                           omega_bound, rigid_body_jacobian, rigid_body_rhs, sorted_axes)
