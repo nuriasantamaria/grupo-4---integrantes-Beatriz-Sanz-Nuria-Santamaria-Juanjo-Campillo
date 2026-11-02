@@ -162,6 +162,31 @@ class EulerExact:
         out[..., self.axes] = self.amp * np.stack([dn, cn, sn], axis=-1)
         return out
  
+    def sample(self, t_end: float, max_points: int = 8000) -> tuple[Array, Array]:
+        """Muestrea omega(t) en [0, t_end] con unos 100 puntos por periodo (1500 si no hay periodo)"""
+        if t_end <= 0:
+            return np.empty(0), np.empty((0, 3))
+        if math.isfinite(self.period):
+            n = int(min(max_points, max(600, 100 * t_end / self.period)))
+        else:
+            n = 1500
+        t = np.linspace(0.0, t_end, n)
+        return t, self.omega(t)
+
+    def orbit(self, n: int = 720) -> Array | None:
+        """Puntos (n, 3) de la órbita de omega en ejes del cuerpo; None en equilibrio"""
+        if self.kind == "equilibrio":
+            return None
+        # se parametriza por el ángulo de amplitud, no por el tiempo, para resolver bien cerca de la separatriz
+        if self.m >= SEP_M:
+            phi = np.linspace(-0.5 * math.pi, 0.5 * math.pi, n + 1)[1:-1]
+        else:
+            phi = np.linspace(0.0, 2 * math.pi, n + 1)
+        out = np.empty((len(phi), 3))
+        s = np.sin(phi)
+        out[:, self.axes] = self.amp * np.stack([np.sqrt(1.0 - self.m * s * s), np.cos(phi), s], axis=-1)
+        return out
+
     def error_parts(self, t: ArrayLike, W: ArrayLike, reset: bool = False) -> tuple[Array, Array, Array]:
         """(r, psi, lag) de W (n, 3): módulo, fase en grados de ciclo y retraso en s (positivos si adelanta)
  

@@ -8,24 +8,15 @@ from typing import NamedTuple
 import numpy as np
 from numpy.linalg import norm
 
-from numerical_engine.integration import cauchy_problem
+from numerical_engine.integration import _check_horizon, cauchy_problem, final_state
 from numerical_engine.numerical_engine import Array, Component, Field, Step, noise_floor
 
 
 def _check_richardson(T: float, N: int, p: float) -> None:
     """ValueError si T no es positivo y finito, N no es entero >= 1 o p no es positivo"""
-    if not (np.isfinite(T) and T > 0):
-        raise ValueError(f"T debe ser positivo y finito (recibido {T!r})")
-    if int(N) != N or N < 1:
-        raise ValueError(f"N debe ser un entero ≥ 1 (recibido {N!r})")
+    _check_horizon(T, N)
     if not (np.isfinite(p) and p > 0):
         raise ValueError(f"el orden p debe ser positivo (recibido {p!r})")
-
-
-def final_state(scheme: Step, f: Field, u0: Array, T: float, N: int, t0: float = 0.0) -> Array:
-    """Estado en t0 + T tras N pasos iguales; ValueError si N < 1 o T no es positivo"""
-    _check_richardson(T, N, 1.0)
-    return cauchy_problem(f, u0, np.linspace(t0, t0 + T, N + 1), scheme)[-1, :]
 
 
 def _rounding_floor(n_steps: int, u: Array) -> float:
@@ -36,7 +27,7 @@ def _rounding_floor(n_steps: int, u: Array) -> float:
 def scheme_order(scheme: Step, f: Field, u0: Array, T: float, N: int,
                  components: Component = slice(None)) -> float:
     """Orden observado log2(|u_N - u_2N| / |u_2N - u_4N|) sobre components; NaN si hay ruido de redondeo o diverge"""
-    _check_richardson(T, N, 1.0)
+    _check_horizon(T, N)
     u1, u2, u3 = (final_state(scheme, f, u0, T, k * N) for k in (1, 2, 4))
     with np.errstate(all="ignore"):
         d12, d23 = norm((u1 - u2)[components]), norm((u2 - u3)[components])

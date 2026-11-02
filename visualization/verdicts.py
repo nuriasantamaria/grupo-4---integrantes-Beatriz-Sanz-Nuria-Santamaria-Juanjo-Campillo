@@ -3,19 +3,15 @@
 from __future__ import annotations
 
 import math
-from functools import lru_cache
 from typing import TypedDict
 
-import numpy as np
 from numpy.typing import ArrayLike
 
 from numerical_engine import noise_floor
 from simulation import LinearErrors, predicted_errors
-from space_physics import (EulerExact, is_degenerate, kinetic_energy, separatrix_side, SEPARATRIX_TOL,
-                           surrounded_axis)
+from space_physics import rotation_regime, rotation_stability
 
 from visualization.cells import dot
-from visualization.geometry import exact_orbit
 
 
 GRADE_WORDS = ("≈ 0", "ínfimo", "relevante")
@@ -92,62 +88,31 @@ def scheme_verdict(lin: LinearErrors, n: int) -> tuple[tuple[str, int], tuple[st
     return (mod, gr), (pha, gp)
 
 
-# ---- estabilidad de la órbita (etiquetas de la GUI)
+# ---- estabilidad de la órbita (etiquetas de la GUI; la clasificación es de space_physics)
+
+REGIME_TEXT = {"reposo": "reposo (ω = 0)", "esfera": "esfera inercial", "simetrico": "sólido simétrico",
+               "separatriz": "sobre la separatriz", "eje_mayor": "precesa en torno al eje mayor",
+               "eje_menor": "precesa en torno al eje menor"}
+MARGINAL_TEXT = {"reposo": "en reposo · sin rotación", "esfera": "esfera inercial · ω constante",
+                 "simetrico": "sólido simétrico · precesión uniforme"}
+
 
 def regime(I: ArrayLike, w0: ArrayLike) -> str:
-    """Régimen geométrico de la órbita (reposo, esfera, simétrico, separatriz o precesión); la estabilidad la da orbit_stability"""
-    twoT = 2 * kinetic_energy(w0, I)
-    if twoT <= 0:
-        return "reposo (ω = 0)"
-    if np.ptp(np.asarray(I, dtype=float)) < 1e-6:
-        return "esfera inercial"
-    if is_degenerate(I):
-        return "sólido simétrico"
-    side = separatrix_side(I, w0)
-    if abs(side) < SEPARATRIX_TOL:
-        return "sobre la separatriz"
-    if side > 0:
-        return "precesa en torno al eje mayor"
-    return "precesa en torno al eje menor"
-
-
-# desviación máxima del eje de giro (grados) a partir de la cual se considera que la rotación vuelca
-FLIP_DEG = 90.0
-
-
-@lru_cache(maxsize=64)
-def _max_deviation(I: tuple[float, ...], w0: tuple[float, ...]) -> float:
-    """Versión con caché de max_deviation, con argumentos hashables"""
-    orbit = exact_orbit(EulerExact(I, w0), 720)
-    if orbit is None:
-        return 0.0
-    dot = np.sum(orbit * np.asarray(w0), axis=1)                 # producto escalar con w0, sin BLAS
-    cos = dot / (np.linalg.norm(orbit, axis=1) * np.linalg.norm(w0))
-    return float(np.degrees(np.arccos(np.clip(cos.min(), -1.0, 1.0))))
-
-
-def max_deviation(I: ArrayLike, w0: ArrayLike) -> float:
-    """Ángulo máximo, en grados, entre omega(t) y omega0 a lo largo de la órbita exacta"""
-    # distingue el eje intermedio: allí llega a ~180 grados por pequeña que sea la perturbación
-    return _max_deviation(tuple(float(x) for x in np.ravel(I)), tuple(float(x) for x in np.ravel(w0)))
+    """Texto del régimen geométrico de la órbita; la estabilidad la da orbit_stability"""
+    return REGIME_TEXT[rotation_regime(I, w0)]
 
 
 def orbit_stability(I: ArrayLike, w0: ArrayLike) -> tuple[str, str]:
     """Estabilidad física de la rotación: (texto, 'estable' | 'marginal' | 'inestable')"""
-    r = regime(I, w0)
-    if "reposo" in r:
-        return "en reposo · sin rotación", "marginal"
-    if "esfera" in r:
-        return "esfera inercial · ω constante", "marginal"
-    if "simétrico" in r:
-        return "sólido simétrico · precesión uniforme", "marginal"
-    dev = max_deviation(I, w0)
-    ax = surrounded_axis(I, w0)
+    s = rotation_stability(I, w0)
+    if s["stability"] == "marginal":
+        return MARGINAL_TEXT[s["regime"]], "marginal"
+    dev, ax = s["deviation"], s["axis"]
     if ax is None:
         donde = " · sobre la separatriz"
     else:
-        lado = "mayor" if "mayor" in r else "menor"
+        lado = "mayor" if s["regime"] == "eje_mayor" else "menor"
         donde = f" · rodea el eje {lado} e{'₁₂₃'[ax]}"
-    if dev >= FLIP_DEG:
+    if s["stability"] == "inestable":
         return f"inestable · vuelca: ω llega a {dev:.0f}° de su dirección inicial{donde}", "inestable"
     return f"estable · ω se desvía como máximo {dev:.0f}° de su dirección inicial{donde}", "estable"

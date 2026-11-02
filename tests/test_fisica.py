@@ -104,7 +104,7 @@ def test_separatriz_exacta_con_omega_q_positivo_y_negativo():
         tt = np.arange(0, 81) * 0.05
         err = np.abs(ex.omega(tt) - rk4_ref(I, w0, 0.0025, 1600)[::20]).max()
         assert err < 1e-6, f"signo {sgn:+d}: {err:.1e}"
-        P = geometry.exact_orbit(ex, 200)
+        P = ex.orbit(200)
         assert (P[:, 2] * sgn >= -1e-12).all(), "la órbita debe ser solo la rama que recorre ω"
 
 
@@ -121,14 +121,14 @@ def test_exacta_conserva_energia_y_momento():
 def test_equilibrios_son_constantes():
     for I, w0 in (((1, 2, 3), (0, 1.7, 0)), ((1, 2, 3), (0, 0, 0)), ((2, 2, 2), (1, 2, 3)), ((1, 1, 3), (1, 1, 0))):
         ex = sp.EulerExact(I, w0)
-        assert ex.kind == "equilibrio" and geometry.exact_orbit(ex) is None
+        assert ex.kind == "equilibrio" and ex.orbit() is None
         assert np.allclose(ex.omega(np.array([0.0, 5.0, 50.0])), np.asarray(w0, float))
 
 
 def test_orbita_cumple_las_dos_conservaciones():
     for nombre, (I, w0) in CASOS.items():
         I, w0 = np.array(I, float), np.array(w0, float)
-        P = geometry.exact_orbit(sp.EulerExact(I, w0), 300)
+        P = sp.EulerExact(I, w0).orbit(300)
         assert np.abs(np.sum(I * P ** 2, axis=1) - np.sum(I * w0 ** 2)).max() < 1e-11, nombre
         assert np.abs(np.sum((I * P) ** 2, axis=1) - np.sum((I * w0) ** 2)).max() < 1e-11, nombre
 
@@ -320,12 +320,14 @@ def test_motor_registro_de_esquemas():
 
 
 def test_motor_regiones_de_estabilidad():
-    """stability_grid: |R| ≤ 1 donde la teoría dice (Euler: círculo |1 + z| ≤ 1; BE: |1 − z| ≥ 1; C-N: Re z ≤ 0)."""
+    """|R| en una malla: |R| ≤ 1 donde la teoría dice (Euler: círculo |1 + z| ≤ 1; BE: |1 − z| ≥ 1; C-N: Re z ≤ 0)."""
     _motor()
     dentro = {"euler": [-1.0, -1.9], "be": [3.0, -2.0, 2.0j], "cn": [-0.5, -3 + 3j], "rk4": [-2.7, 2.8j]}
     fuera = {"euler": [0.5j, 0.1], "be": [1.0 + 0.5j, 1.5], "cn": [0.1, 0.1 + 2j], "rk4": [-2.9, 3.0j]}
     for k, s in ne.SCHEMES.items():
-        x, y, A = ne.stability_grid(s.amplification, (-4.0, 4.0), (-4.0, 4.0), n=401)
+        x = y = np.linspace(-4.0, 4.0, 401)
+        with np.errstate(all="ignore"):
+            A = np.nan_to_num(np.abs(s.amplification(x[:, None] + 1j * y[None, :])), nan=np.inf)
         en = lambda z: A[np.argmin(abs(x - z.real)), np.argmin(abs(y - z.imag))]
         for z in dentro[k]:
             assert en(complex(z)) <= 1.0, f"{M[k]}: z = {z} debería ser estable (|R| = {en(complex(z)):.3f})"
@@ -435,7 +437,7 @@ def test_cartas_del_plano_de_fases():
 
 def test_muestreo_de_la_solucion_exacta_y_comparacion_de_problemas():
     ex = sp.EulerExact((1, 2, 3), (2.0, 0.3, 0.3))
-    t, W = geometry.exact_sample(ex, 5 * ex.period)
+    t, W = ex.sample(5 * ex.period)
     assert 600 <= len(t) <= 8000 and np.allclose(W, ex.omega(t))
     assert initial_conditions.same_problem((1, 2, 3), (2, .3, .3), (1, 2, 3), (2, .3, .3)) and not initial_conditions.same_problem((1, 2, 3), (2, .3, .3), (1, 2, 4), (2, .3, .3))
     assert initial_conditions.surface_mismatch((1, 2, 3), (2, .3, .3), (1, 2, 3), (2, .3, .3)) is None
@@ -468,6 +470,19 @@ def test_reposo_omega_cero():
     assert verdicts.orbit_stability((1, 2, 3), (0, 0, 0))[1] == "marginal"
     assert verdicts.orbit_stability((1, 1, 3), (0.3, 0.2, 1.0))[1] == "marginal"
     assert all(e["nonlinear"] == "neutro" for e in sp.equilibrium_analysis((1, 2, 3), 0.0))
+
+
+def test_regimen_y_estabilidad_de_la_rotacion():
+    """space_physics clasifica con códigos, sin depender del texto de la interfaz."""
+    casos = [((1, 2, 3), (0, 0, 0), "reposo", "marginal"), ((2, 2, 2), (0.3, 0.2, 1.0), "esfera", "marginal"),
+             ((1, 1, 3), (0.3, 0.2, 1.0), "simetrico", "marginal"), ((1, 2, 3), (2.0, 0.08, 0.08), "eje_menor", "estable"),
+             ((1, 2, 3), (0.08, 0.08, 2.0), "eje_mayor", "estable")]
+    for I, w0, regimen, estabilidad in casos:
+        s = sp.rotation_stability(I, w0)
+        assert sp.rotation_regime(I, w0) == s["regime"] == regimen, (I, w0, s)
+        assert s["stability"] == estabilidad, (I, w0, s)
+    assert sp.rotation_stability((1, 2, 3), (0.01, 2.0, 0.01))["stability"] == "inestable"
+    assert sp.rotation_stability((1, 2, 3), (2.0, 0.08, 0.08))["axis"] == 0
 
 
 def test_reasignar_ejes():
@@ -570,12 +585,12 @@ def test_estabilidad_del_eje_intermedio_frente_a_los_extremos():
     (llega a ~180°) y sí en los extremos (∝ perturbación)."""
     I = (1.0, 2.0, 3.0)
     for eps in (0.3, 0.1, 0.01):
-        assert verdicts.max_deviation(I, (eps, 2.0, eps)) > 160.0
+        assert sp.max_deviation(I, (eps, 2.0, eps)) > 160.0
         assert verdicts.orbit_stability(I, (eps, 2.0, eps))[1] == "inestable"
-        assert verdicts.max_deviation(I, (2.0, eps, eps)) < 120 * eps
+        assert sp.max_deviation(I, (2.0, eps, eps)) < 120 * eps
         assert verdicts.orbit_stability(I, (2.0, eps, eps))[1] == "estable"
         assert verdicts.orbit_stability(I, (eps, eps, 2.0))[1] == "estable"
-    assert verdicts.max_deviation(I, (2.0, 0.01, 0.01)) < 1.0
+    assert sp.max_deviation(I, (2.0, 0.01, 0.01)) < 1.0
     assert "inestable" in verdicts.orbit_stability(I, (0.01, 2.0, 0.01))[0]      # sobre la separatriz también
 
 def test_R_descubierta_coincide_con_la_formula_teorica():

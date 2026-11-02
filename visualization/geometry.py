@@ -1,5 +1,5 @@
 """Geometría para dibujar (sin Qt): forma y actitud del cuerpo, elipsoides de Poinsot, polhodias,
-separatriz, cartas del plano de fases y puntos de la solución exacta"""
+separatriz y cartas del plano de fases"""
 
 from __future__ import annotations
 
@@ -8,8 +8,8 @@ import math
 import numpy as np
 from numpy.typing import ArrayLike
 
-from space_physics import (angular_momentum_sq, Array, euler_equations, EulerExact, is_degenerate,
-                           kinetic_energy, SEP_M, sorted_axes, surrounded_axis)
+from space_physics import (angular_momentum_sq, Array, euler_equations, is_degenerate,
+                           kinetic_energy, sorted_axes, surrounded_axis)
 
 
 # No intervienen en la resolución del problema: space_physics y numerical_engine no los usan.
@@ -258,34 +258,3 @@ def chart_reference_orbit(I: ArrayLike, w0: ArrayLike, k: int, sign: int, n_pts:
     a, b = I[i] * (I[i] - I[k]), I[j] * (I[j] - I[k])
     curves = chart_level_curve(I, 2 * float(kinetic_energy(w0, I)), k, a * w0[i] ** 2 + b * w0[j] ** 2, n_pts)
     return np.vstack([np.vstack([C, [[np.nan, np.nan]]]) for C in curves]) if curves else None
-
-
-# ---- solución exacta: puntos para dibujar
-
-
-def exact_sample(ex: EulerExact, t_end: float, max_points: int = 8000) -> tuple[Array, Array]:
-    """Muestrea omega(t) en [0, t_end] con unos 100 puntos por periodo (1500 si no hay periodo)"""
-    if t_end <= 0:
-        return np.empty(0), np.empty((0, 3))
-    if math.isfinite(ex.period):
-        n = int(min(max_points, max(600, 100 * t_end / ex.period)))
-    else:
-        n = 1500
-    t = np.linspace(0.0, t_end, n)
-    return t, ex.omega(t)
-
-
-
-def exact_orbit(ex: EulerExact, n: int = 720) -> Array | None:
-    """Puntos (n, 3) de la órbita de omega en ejes del cuerpo; None en equilibrio"""
-    if ex.kind == "equilibrio":
-        return None
-    # se parametriza por el ángulo de amplitud, no por el tiempo, para resolver bien cerca de la separatriz
-    if ex.m >= SEP_M:
-        phi = np.linspace(-0.5 * math.pi, 0.5 * math.pi, n + 1)[1:-1]
-    else:
-        phi = np.linspace(0.0, 2 * math.pi, n + 1)
-    out = np.empty((len(phi), 3))
-    s = np.sin(phi)
-    out[:, ex.axes] = ex.amp * np.stack([np.sqrt(1.0 - ex.m * s * s), np.cos(phi), s], axis=-1)
-    return out

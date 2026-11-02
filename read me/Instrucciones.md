@@ -19,7 +19,7 @@ Cada capa es un paquete. Las dependencias van siempre hacia abajo y no hay ciclo
 | Carpeta | Capa | Archivos |
 |---|---|---|
 | `space_physics/` | Física (sin Qt ni numérica) | `model.py`: ecuaciones de Euler, invariantes 2T y ‖L‖² y su deriva (`conservation_drift`), cuaternión, campo f(u, t) y su Jacobiana, cota `omega_bound`. `exact.py`: **solución exacta** (`EulerExact`, funciones de Jacobi). `equilibria.py`: **equilibrios con autovalores analíticos**, estabilidad lineal/no lineal, lado de la separatriz. |
-| `numerical_engine/` | Algorítmica (genérica, no sabe nada del sólido) | `numerical_engine.py`: esquemas Euler, Euler implícito, Crank–Nicolson y RK4 con su registro `SCHEMES` (orden, R(z), nombre), `cauchy_problem`/`integrate`, ruido de redondeo (`noise_floor`). `richardson.py`: orden observado, error estimado y extrapolación (`richardson_analysis`). `stability.py`: malla de estabilidad (`stability_grid`). Valida sus entradas. |
+| `numerical_engine/` | Algorítmica (genérica, no sabe nada del sólido) | `numerical_engine.py`: Newton, esquemas Euler, Euler implícito, Crank–Nicolson y RK4, y ruido de redondeo (`noise_floor`). `schemes.py`: registro `SCHEMES` (orden, nombre). `integration.py`: `cauchy_problem`, `integrate` y `final_state`. `richardson.py`: orden observado, error estimado y extrapolación (`richardson_analysis`). `stability.py`: R(z) de cada esquema sacada de su paso (`amplification_factor`). Valida sus entradas. |
 | `simulation/` | Modelo de la GUI (sin Qt) | `simulation.py`: `Simulation` (historial, derivas, error frente a la exacta, rebobinado, cambio de esquema al vuelo), `run_preview`, `richardson_report`, `convergence_report`. `divergence.py`: detección de divergencia a partir del módulo de ω (`stop_criterion`, `first_divergence`, `omega_threshold`). `error_analysis.py`: teoría lineal por paso, efecto de cada esquema en los equilibrios, estudio de convergencia. |
 | `visualization/` | Visualización (PySide6 + pyqtgraph) | Ver la tabla siguiente. |
 | `tests/` | Pruebas | `test_fisica.py`, `test_simulation.py`, `test_richardson.py`: física, motor numérico, sesión de simulación y Richardson. |
@@ -31,10 +31,10 @@ Cada capa es un paquete. Las dependencias van siempre hacia abajo y no hay ciclo
 |---|---|---|
 | `palette.py` | no | Colores. |
 | `schemes.py` | no | Etiquetas, colores y órdenes de cada esquema; región de estabilidad en caché. |
-| `geometry.py` | no | Forma y actitud del cuerpo, elipsoides de Poinsot, polhodias, separatriz, cartas del plano de fases, puntos de la solución exacta. |
+| `geometry.py` | no | Forma y actitud del cuerpo, elipsoides de Poinsot, polhodias, separatriz, cartas del plano de fases. |
 | `initial_conditions.py` | no | Edición de Ω₀ por ejes y comparación de problemas. |
 | `plot_tools.py` | no | Escalas, máscaras, flechas y contorno de la región de estabilidad (`stability_contour`). |
-| `verdicts.py` | no | Gravedad de los errores, resolución del paso, estabilidad de la órbita (`max_deviation`, `FLIP_DEG`). |
+| `verdicts.py` | no | Gravedad de los errores, resolución del paso y texto de la estabilidad de la órbita (la calcula `space_physics/equilibria.py`: `rotation_stability`, `max_deviation`, `FLIP_DEG`). |
 | `cells.py` | no | Celdas de tabla. |
 | `scenarios.py` | no | Escenarios predefinidos (`SCENARIOS`) y configuración inicial. |
 | `help_text.py` | no | Texto de la ayuda (F1). |
@@ -84,7 +84,7 @@ En la rotación pura ω = Ω eₖ la Jacobiana tiene autovalores λ = 0 y λ² =
 
 ## Pestañas
 
-- **Dinámica**: ω(t), poloide/polhodia, elipsoide de Poinsot y satélite 3D, con la previsualización de la trayectoria completa.
+- **Dinámica**: a la izquierda, la órbita de ω en 3D sobre los elipsoides de energía y momento, con separatriz, polhodias y previsualización; a la derecha, la orientación 3D del cuerpo en el marco inercial, con sus ejes, L y ω.
 - **Derivas**: ΔT y ΔL (conservación de energía y momento angular) frente al tiempo.
 - **Error vs exacta**: error de módulo r y de fase ψ de cada simulación frente a la solución analítica, con el ruido de redondeo marcado.
 - **Plano de fases**: órbitas del flujo reducido, equilibrios y separatrices.

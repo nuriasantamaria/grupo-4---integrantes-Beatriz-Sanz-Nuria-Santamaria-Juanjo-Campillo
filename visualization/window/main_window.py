@@ -25,7 +25,7 @@ from visualization import theme
 from visualization.cells import DASH, dot, num_or_dash
 from visualization.controls import FloatSlider, group_box, PhysicsSliders, SimConfigPanel
 from visualization.geometry import (attitude_vectors, body_half_sizes, chart_axes, chart_domain,
-                                    chart_reference_orbit, default_chart, exact_orbit, exact_sample,
+                                    chart_reference_orbit, default_chart,
                                     phase_plane_orbits, poinsot_semiaxes, polhode_family, project_to_chart,
                                     reduced_flow_field, separatrix_curves)
 from visualization.help_text import HELP_HTML
@@ -42,7 +42,7 @@ from visualization.skins.ufo import ufo_items
 from visualization.theme import axis_label_style, badge_css, pill, rgba
 from visualization.verdicts import (amplitude_trend, COARSE_BETA_DT, grade_pair, GRADE_WORDS,
                                     orbit_stability, scheme_verdict, step_resolution, TINY_PSI, TINY_R)
-from visualization.widgets import (AdaptiveSplitter, Card, control_row, DataTable, FlowLayout, LinkedCursor,
+from visualization.widgets import (AdaptiveSplitter, Card, control_row, DataTable, LinkedCursor,
                                    muted_label, noise_floor_line, num, plain_body, scroll_area)
 from visualization.workers import AnalysisWorker, PreviewWorker
 
@@ -130,7 +130,6 @@ class MainWindow(QtWidgets.QMainWindow):
         main.addLayout(self._build_banner())
 
         self.dyn_tab = self._build_dynamics_tab()
-
         self.drift_tab = self._build_drift_tab()
 
         self.view_tabs = self._build_view_tabs()
@@ -144,14 +143,24 @@ class MainWindow(QtWidgets.QMainWindow):
         self.status = QtWidgets.QStatusBar()
         self.setStatusBar(self.status)
 
+    def _view_group(self, title: str, *widgets: QtWidgets.QWidget) -> QtWidgets.QGroupBox:
+        """Grupo de opciones de una vista en la barra lateral; _update_sidebar decide cuándo se ve"""
+        box = group_box(title, widgets)
+        self.view_options.addWidget(box)
+        return box
+
     def _build_dynamics_tab(self) -> QtWidgets.QWidget:
-        """Pestaña Dinámica: órbita en el espacio de fases y orientación del cuerpo"""
+        """Pestaña Dinámica: la órbita en el espacio de fases a la izquierda y la orientación del cuerpo a la derecha"""
+        tab = AdaptiveSplitter(threshold=0)      # sin umbral: siempre una al lado de la otra, a partes iguales
+        tab.addWidget(self._build_orbit_card())
+        tab.addWidget(self._build_body_card())
+        return tab
+
+    def _build_orbit_card(self) -> QtWidgets.QWidget:
+        """Tarjeta de la órbita en el espacio de fases, con sus opciones en la barra lateral"""
         self.phase_view = gl.GLViewWidget()
         self.phase_view.setBackgroundColor(VIEW_BG)
-        self.sat_view = gl.GLViewWidget()
-        self.sat_view.setBackgroundColor(VIEW_BG)
         self.phase_view.setMinimumSize(200, 200)
-        self.sat_view.setMinimumSize(200, 200)
 
         def surface_check(text: str, color: str, tip: str) -> QtWidgets.QCheckBox:
             c = QtWidgets.QCheckBox(text)
@@ -177,15 +186,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.trail_spin.setKeyboardTracking(False)
         self.trail_spin.setToolTip("Duración visible de la estela, igual para todas las simulaciones "
                                    "(órbita 3D y plano de fases)")
-        bar = FlowLayout(hspacing=12, vspacing=4)
-        for c in (self.chk_E, self.chk_L, self.chk_sep, self.chk_fam, self.chk_exact):
-            bar.addWidget(c)
-        trail_box = QtWidgets.QWidget()
-        tb = QtWidgets.QHBoxLayout(trail_box)
-        tb.setContentsMargins(0, 0, 0, 0)
-        tb.addWidget(QtWidgets.QLabel("Estela"))
-        tb.addWidget(self.trail_spin)
-        bar.addWidget(trail_box)
+        self.surface_group = self._view_group("Órbita · elementos visibles", self.chk_E, self.chk_L, self.chk_sep,
+                                              self.chk_fam, self.chk_exact)
+        self.trail_group = self._view_group("Estela", self.trail_spin)
 
         self.surface_notice = self._notice_label()
         phase_body = QtWidgets.QWidget()
@@ -193,40 +196,31 @@ class MainWindow(QtWidgets.QMainWindow):
         pv = QtWidgets.QVBoxLayout(phase_body)
         pv.setContentsMargins(0, 0, 0, 0)
         pv.setSpacing(6)
-        pv.addLayout(bar)
         pv.addWidget(self.surface_notice)
         pv.addWidget(self.phase_view, 1)
         self.phase_card = Card("Órbita en el espacio de fases (ω₁, ω₂, ω₃)", phase_body,
                                "elipsoide T · elipsoide ‖L‖ · separatriz")
+        return self.phase_card
+
+    def _build_body_card(self) -> QtWidgets.QWidget:
+        """Tarjeta de la orientación del cuerpo, con la forma en la barra lateral"""
+        self.sat_view = gl.GLViewWidget()
+        self.sat_view.setBackgroundColor(VIEW_BG)
+        self.sat_view.setMinimumSize(200, 200)
 
         self.shape_combo = QtWidgets.QComboBox()
         self.shape_combo.addItems(["Satélite", "Paralelepípedo", "Elipsoide", "Vaca", "Caza Estelar", "OVNI"])
         self.shape_combo.currentIndexChanged.connect(lambda _: self._rebuild_satellites(force=True))
-        sat_bar = QtWidgets.QHBoxLayout()
-        sat_bar.addWidget(QtWidgets.QLabel("Forma"))
-        sat_bar.addWidget(self.shape_combo)
-        sat_bar.addStretch(1)
-        sat_body = QtWidgets.QWidget()
-        sat_body.setObjectName("plain")
-        sv = QtWidgets.QVBoxLayout(sat_body)
-        sv.setContentsMargins(0, 0, 0, 0)
-        sv.setSpacing(6)
-        sv.addLayout(sat_bar)
-        sv.addWidget(self.sat_view, 1)
-        self.sat_card = Card("Orientación del cuerpo (marco inercial)", sat_body)
+        self.shape_group = self._view_group("Forma del cuerpo", self.shape_combo)
+        self.sat_card = Card("Orientación del cuerpo (marco inercial)", self.sat_view)
         self.sat_card.subtitle.setTextFormat(QtCore.Qt.TextFormat.RichText)
+        self.sat_card.subtitle.setWordWrap(True)
         self.sat_card.subtitle.setText(
             "<span style='color:%s'>e₁</span> <span style='color:%s'>e₂</span> "
             "<span style='color:%s'>e₃</span> ejes · "
             "<span style='color:#FFD933'>L</span> momento · <span style='color:#FFFFFF'>ω</span> vel. angular"
             % tuple(AXIS_COLORS))
-
-        self.dyn_tab = AdaptiveSplitter(1000)
-        self.dyn_tab.setChildrenCollapsible(False)
-        self.dyn_tab.addWidget(self.phase_card)
-        self.dyn_tab.addWidget(self.sat_card)
-        self.dyn_tab.setSizes([1, 1])
-        return self.dyn_tab
+        return self.sat_card
 
     def _build_drift_tab(self) -> QtWidgets.QWidget:
         """Pestaña Derivas: deriva de energía, deriva del momento y velocidad angular de la referencia"""
@@ -254,7 +248,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.drift_readout.setTextFormat(QtCore.Qt.TextFormat.RichText)
         self.drift_readout.setObjectName("muted")
         log_row.addWidget(self.drift_readout, 1)
-        log_row.addWidget(self.chk_log)
+        self.drift_group = self._view_group("Derivas", self.chk_log)
         self.drift_tab = QtWidgets.QWidget()
         dv = QtWidgets.QVBoxLayout(self.drift_tab)
         dv.setContentsMargins(0, 0, 0, 0)
@@ -296,9 +290,25 @@ class MainWindow(QtWidgets.QMainWindow):
         for w_ in (self.clock_label, ref_lbl, self.ref_combo):
             cl.addWidget(w_)
         self.view_tabs.setCornerWidget(corner, QtCore.Qt.Corner.TopRightCorner)
+        # grupos propios de cada pestaña; ejecución, escenarios, física y esquemas afectan a todas y siempre se ven
+        self._sidebar_groups = {
+            self.dyn_tab: (self.surface_group, self.trail_group, self.shape_group, self.preview_box),
+            self.drift_tab: (self.drift_group, self.preview_box),
+            self.err_tab: (self.err_group, self.preview_box),
+            self.plane_tab: (self.plane_group, self.trail_group, self.preview_box),
+            self.analysis_tab: (),
+        }
+        self._update_sidebar()
         return self.view_tabs
 
+    def _update_sidebar(self) -> None:
+        """Deja en la barra lateral solo lo que afecta a la pestaña visible"""
+        shown = self._sidebar_groups[self.view_tabs.currentWidget()]
+        for group in {g for groups in self._sidebar_groups.values() for g in groups}:
+            group.setVisible(group in shown)
+
     def _on_tab_changed(self, _: int | None = None) -> None:
+        self._update_sidebar()
         self._refresh_views()
         self._update_status()
 
@@ -359,11 +369,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.err_readout = QtWidgets.QLabel()
         self.err_readout.setTextFormat(QtCore.Qt.TextFormat.RichText)
         self.err_readout.setObjectName("muted")
-
-        bar = FlowLayout(hspacing=12, vspacing=4)
-        for w in (QtWidgets.QLabel("Componente"), self.err_comp, QtWidgets.QLabel("Fase en"),
-                  self.err_unit, self.chk_log_err, self.err_readout):
-            bar.addWidget(w)
+        self.err_readout.setWordWrap(True)
+        self.err_group = self._view_group("Error frente a la exacta",
+                                          control_row(QtWidgets.QLabel("Componente"), self.err_comp),
+                                          control_row(QtWidgets.QLabel("Fase en"), self.err_unit),
+                                          self.chk_log_err)
         self.err_notice = self._notice_label()
 
         self.plot_ew = pg.PlotWidget()
@@ -397,7 +407,7 @@ class MainWindow(QtWidgets.QMainWindow):
         lv = QtWidgets.QVBoxLayout(left)
         lv.setContentsMargins(0, 0, 0, 0)
         lv.setSpacing(6)
-        lv.addLayout(bar)
+        lv.addWidget(self.err_readout)
         lv.addWidget(self.err_notice)
         lv.addWidget(split, 1)
 
@@ -522,7 +532,7 @@ class MainWindow(QtWidgets.QMainWindow):
     @staticmethod
     def _exact_curve(exact: EulerExact, t_end: float, comp: int, live: bool) -> tuple[Array, Array]:
         """Componente de la solución exacta en una malla propia, independiente del paso"""
-        t, W = exact_sample(exact, t_end, 8000 if live else 40000)
+        t, W = exact.sample(t_end, 8000 if live else 40000)
         return t, W[:, comp]
 
     def _build_plane_tab(self) -> QtWidgets.QWidget:
@@ -532,8 +542,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.plot_plane.setAspectLocked(True)
         self.plot_plane.addLegend(offset=(8, 8), labelTextSize="9pt")
 
-        controls = FlowLayout(hspacing=10, vspacing=4)
-        controls.addWidget(QtWidgets.QLabel("Equilibrio"))
         self.plane_axis = QtWidgets.QComboBox()
         self.plane_axis.addItems(["Automático (eje de la órbita de ref.)",
                                   "e₁  (ω₁ = ±Ω)", "e₂  (ω₂ = ±Ω)", "e₃  (ω₃ = ±Ω)"])
@@ -549,18 +557,17 @@ class MainWindow(QtWidgets.QMainWindow):
                                    "la órbita de la simulación de referencia")
         for w in (self.plane_axis, self.plane_sign):
             w.currentIndexChanged.connect(self._update_phase_plane)
-        controls.addWidget(self.plane_axis)
         self.plane_sign_lbl = QtWidgets.QLabel("Signo")
-        controls.addWidget(self.plane_sign_lbl)
-        controls.addWidget(self.plane_sign)
         self.chk_plane_field.toggled.connect(self._update_phase_plane)
-        controls.addWidget(self.chk_plane_field)
+        self.plane_group = self._view_group("Plano de fases",
+                                            control_row(QtWidgets.QLabel("Equilibrio"), self.plane_axis),
+                                            control_row(self.plane_sign_lbl, self.plane_sign),
+                                            self.chk_plane_field)
 
         body = QtWidgets.QWidget()
         body.setObjectName("plain")
         v = QtWidgets.QVBoxLayout(body)
         v.setContentsMargins(0, 0, 0, 0)
-        v.addLayout(controls)
         self.plane_notice = self._notice_label()
         v.addWidget(self.plane_notice)
         v.addWidget(self.plot_plane, 1)
@@ -787,6 +794,11 @@ class MainWindow(QtWidgets.QMainWindow):
         lay.setContentsMargins(4, 4, 8, 4)
         lay.setSpacing(10)
 
+        # ---- opciones de la pestaña visible: los grupos los añade cada pestaña al construirse (_view_group)
+        self.view_options = QtWidgets.QVBoxLayout()
+        self.view_options.setSpacing(10)
+        lay.addLayout(self.view_options)
+
         # ---- escenarios
         box = QtWidgets.QGroupBox("Escenarios predefinidos")
         v = QtWidgets.QVBoxLayout(box)
@@ -832,7 +844,7 @@ class MainWindow(QtWidgets.QMainWindow):
         lay.addWidget(self.tabs)
 
         # ---- previsualización
-        box = QtWidgets.QGroupBox("Previsualización")
+        box = self.preview_box = QtWidgets.QGroupBox("Previsualización")
         g = QtWidgets.QGridLayout(box)
         btn_prev = QtWidgets.QPushButton("↻  Calcular")
         btn_prev.setObjectName("accent")
@@ -1818,7 +1830,7 @@ class MainWindow(QtWidgets.QMainWindow):
         ref = self.sims[ref_k]
         for k, sim in enumerate(self.sims):
             own = sim.cfg.enabled and (k == ref_k or not self._same_exact(ref.cfg, sim.cfg))
-            P = exact_orbit(sim.exact, 720) if own else None
+            P = sim.exact.orbit(720) if own else None
             self._exact_show[k] = P is not None and len(P) > 1
             if self._exact_show[k]:
                 is_ref = k == ref_k
@@ -2111,8 +2123,8 @@ class MainWindow(QtWidgets.QMainWindow):
                     if live:
                         self.trail_lines[k].setData(pos=W)
                     self.heads[k].setData(pos=W[-1:])
-            self._update_satellites()
             self._update_exact_markers()
+            self._update_satellites()
         elif cur is self.drift_tab:
             for k, sim in enumerate(self.sims):
                 if sim.cfg.enabled and sim.nv > 1:

@@ -167,6 +167,8 @@ Para medir el error de los integradores con rigor, el módulo implementa la **so
 En el constructor se decide qué eje rodea la órbita comparando $\lVert L\rVert^2$ con $2T\,I_{\text{med}}$. Después se obtienen las amplitudes de las relaciones $\omega_p^2 + g_p\,\omega_r^2 = A_p^2$, y de ellas $m$, $\omega_u$ y la fase inicial $u_0 = F(\theta_0\,|\,m)$.
 
 - `omega(t)`: entrada, tiempos de forma arbitraria; salida, `t.shape + (3,)`. Evalúa $\omega_p = A_p\,\mathrm{dn}$, $\omega_q = A_q\,\mathrm{cn}$, $\omega_r = A_r\,\mathrm{sn}$.
+- `sample(t_end, max_points)`: muestrea $\omega(t)$ en $[0, t_{\text{end}}]$, con unos 100 puntos por periodo.
+- `orbit(n)`: puntos de la órbita de $\omega$ en ejes del cuerpo, parametrizados por el ángulo de amplitud (`None` en equilibrio).
 - `error_parts(t, W, reset=False)`: compara una trayectoria numérica `W` (n,3) con la exacta y separa el error en dos partes. Devuelve:
   - `r`: error de **módulo** relativo (amplitud de la órbita);
   - `psi`: error de **fase** en grados de ciclo, positivo si el esquema adelanta;
@@ -178,6 +180,9 @@ En el constructor se decide qué eje rodea la órbita comparando $\lVert L\rVert
 
 - `separatrix_side(I, w0)`: $(\lVert L\rVert^2 - 2T I_{\text{med}})/(2T I_{\text{med}})$. Positivo: la órbita rodea el eje mayor; negativo: el menor; aproximadamente 0: separatriz.
 - `surrounded_axis(I, w0)`: eje extremo que rodea la órbita, o `None` en la separatriz, en sólidos simétricos o en reposo.
+- `rotation_regime(I, w0)`: código del régimen de la órbita (`reposo`, `esfera`, `simetrico`, `separatriz`, `eje_mayor` o `eje_menor`).
+- `max_deviation(I, w0)`: ángulo máximo entre $\omega(t)$ y $\omega_0$ sobre la órbita exacta.
+- `rotation_stability(I, w0) -> RotationStability`: régimen, estabilidad, desviación y eje; la órbita vuelca si la desviación llega a `FLIP_DEG` = 90°. `visualization/verdicts.py` solo la convierte en texto.
 - `linear_step_errors(I, w0, amplification, dt) -> LinearErrors | None`: en el centro que rodea la órbita, con frecuencia $\beta = |\operatorname{Im}\mu|$, evalúa $R(i\beta\Delta t)$ del esquema y devuelve el error de módulo por paso `dmod` $= |R| - 1$ y el de fase `dphase` $= \arg R - \beta\Delta t$. Es el enlace teórico entre la física (autovalores) y la numérica (función de amplificación).
 - `equilibrium_amplification(...)`: $|R(\lambda\Delta t)|$ en un equilibrio concreto.
 - `relevant_eigenvalues(I, w0)`: autovalores no nulos del equilibrio que gobierna la órbita; la GUI los representa como $\lambda\Delta t$ sobre las regiones de estabilidad.
@@ -220,7 +225,7 @@ Todos comparten la firma `scheme(f, u, delta, t) -> ndarray`:
 
 #### 2.2.2 Registro de esquemas y funciones de amplificación
 
-Cada esquema se registra con sus propiedades teóricas en `SCHEMES: dict[str, Scheme]`, de modo que la GUI y los análisis leen de un único sitio el orden, la función $R(z)$ y el nombre.
+Cada esquema se registra con sus propiedades teóricas en `SCHEMES: dict[str, Scheme]` (`numerical_engine/schemes.py`), de modo que la GUI y los análisis leen de un único sitio el orden, la función $R(z)$ y el nombre.
 
 | Clave | `amplification` $R(z)$ | `order` | `module_order` | `phase_order` | `implicit` |
 |---|---|---|---|---|---|
@@ -264,7 +269,7 @@ $$
 
 La **estabilidad absoluta** se evalúa sobre el problema test $\dot y = \lambda y$: el esquema es estable si $|R(\lambda\Delta t)| \le 1$.
 
-- `stability_grid(amplification, re, im, n) -> (x, y, A)`: evalúa $A_{ij} = |R(x_i + i\,y_j)|$ en una malla $n\times n$ vectorizada. Donde $R$ no está definida (polo de Crank–Nicolson o de Euler implícito) asigna $+\infty$.
+- `amplification_factor(scheme, z, implicit)` (`stability.py`): obtiene $R(z)$ del propio paso del esquema, con el problema test $\dot u = zu$, $u = 1$ y $\Delta t = 1$. En la GUI, `stability_contour` (`visualization/plot_tools.py`) evalúa $|R|$ en una malla del plano complejo y asigna $+\infty$ donde $R$ no está definida.
 - La GUI extrae de esta malla la frontera $|R| = 1$ (`level_curve`, *marching squares*) y superpone los puntos $\lambda\Delta t$ con los autovalores **reales** del sólido (`relevant_eigenvalues`). Así se ve directamente si el paso elegido deja el espectro del problema dentro o fuera de la región de estabilidad.
 - En tiempo de ejecución, la estabilidad se vigila con dos mecanismos: el corte por `limit` dentro de `integrate` y la cota física `omega_bound` aplicada por `first_divergence` en `simulation.py`.
 
@@ -351,7 +356,7 @@ Interfaz construida con **PySide6** (Qt 6), **pyqtgraph** para las gráficas 2D 
 
 `MainWindow` (subclase de `QMainWindow`) se divide en:
 
-- **Panel izquierdo** (`_build_header`, `_build_controls`): botones Iniciar/Pausa y Reiniciar, velocidad de reproducción, tiempo de parada, selector de escenarios didácticos (`SCENARIOS`), problema físico compartido (`PhysicsSliders`) y tres pestañas A/B/C de configuración por simulación (`SimConfigPanel`).
+- **Panel izquierdo** (`_build_header`, `_build_controls`): botones Iniciar/Pausa y Reiniciar, velocidad de reproducción, tiempo de parada, selector de escenarios didácticos (`SCENARIOS`), problema físico compartido (`PhysicsSliders`) y tres pestañas A/B/C de configuración por simulación (`SimConfigPanel`). Muestra además las opciones propias de la pestaña visible (`_update_sidebar`).
 - **Banner superior** (`_build_banner`): una ficha por simulación con tres diagnósticos: **Órbita** (estabilidad física), **Esquema** (lo que predice la teoría lineal con ese $\Delta t$) y **Observado** (el error medido).
 - **Pestañas de vistas** (`_build_view_tabs`, accesibles con Ctrl+1…5): *Dinámica*, *Derivas*, *Error vs exacta*, *Plano de fases* y *Análisis*.
 - **Línea de tiempo** (`_build_timeline`): rebobinado y avance paso a paso.
@@ -367,7 +372,7 @@ Vista `phase_view` (`GLViewWidget`) de la pestaña *Dinámica*.
 | `_update_static_phase()` | Reconstruye la geometría al cambiar $I$ u $\Omega_0$ | Escala los vértices de una esfera unidad por los semiejes de Poinsot. Añade las curvas de `separatrix_curves` y la familia de polhodias de `polhode_family`. Ajusta los ejes y la cámara. |
 | `separatrix_curves(I, twoT)` | Las dos separatrices | Parametrización cerrada que pasa por los equilibrios del eje intermedio. |
 | `polhode_family(I, twoT, n_levels)` | Polhodias alrededor de los ejes extremos | Niveles de $\lVert L\rVert^2$ entre $2T I_{\min}$ y $2T I_{\max}$ intersecados con el elipsoide de energía. |
-| `_update_exact_orbits()` | Órbita exacta | `exact_orbit(EulerExact)` parametrizada por el ángulo de amplitud (resuelve bien la zona cercana a la separatriz) y dibujada como **tubo** (`tube`), porque el grosor de las líneas GL depende del controlador gráfico. |
+| `_update_exact_orbits()` | Órbita exacta | `EulerExact.orbit()` parametrizada por el ángulo de amplitud (resuelve bien la zona cercana a la separatriz) y dibujada como **tubo** (`tube`), porque el grosor de las líneas GL depende del controlador gráfico. |
 | `_update_equilibria()` | Puntos $\pm\Omega_k\mathbf e_k$ | Coloreados por estabilidad (verde estable, azul marginal, rojo inestable). Rellena además las tablas de equilibrios y de efecto del esquema. |
 | `_refresh_views()` (rama *Dinámica*) | Estela y cabeza | Últimos `trail_spin / dt` puntos de `sim.vY[:, :3]`. La estela tiene la misma duración en segundos para todas las simulaciones aunque sus $\Delta t$ difieran. |
 

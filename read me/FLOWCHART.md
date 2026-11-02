@@ -101,6 +101,7 @@ flowchart TD
         E_INIT["__init__.py"]
         E_RICH["richardson.py"]
         E_STAB["stability.py"]
+        E_SCH["schemes.py"]
         E_INT["integration.py"]
         E_NE["numerical_engine.py"]
     end
@@ -139,13 +140,14 @@ flowchart TD
     S_ERR --> E_INIT
     S_ERR --> P_INIT
 
-    E_INIT --> E_NE & E_RICH & E_STAB & E_INT
+    E_INIT --> E_NE & E_RICH & E_STAB & E_SCH & E_INT
     E_RICH --> E_NE & E_INT
     E_STAB --> E_NE
+    E_SCH --> E_STAB & E_NE
     E_INT --> E_NE
 
     P_INIT --> P_EQ & P_EX & P_MOD
-    P_EQ --> P_MOD
+    P_EQ --> P_MOD & P_EX
     P_EX --> P_MOD
 
     T_FIS -.-> P_INIT & E_INIT & S_DIV & S_ERR & V_PURE
@@ -177,8 +179,8 @@ flowchart TD
     end
 
     subgraph PURE["ampli/visualization/ (without Qt)"]
-        GEO["geometry.py<br/>body, Poinsot, separatrix,<br/>phase plane, exact orbit"]
-        VER["verdicts.py<br/>error grades, orbit stability"]
+        GEO["geometry.py<br/>body, Poinsot, separatrix,<br/>phase plane"]
+        VER["verdicts.py<br/>error grades, stability labels"]
         SCEN["scenarios.py<br/>presets, default configs"]
         IC["initial_conditions.py<br/>ω0 editing by axes"]
         SCH["schemes.py<br/>labels, colors, orders"]
@@ -199,7 +201,7 @@ flowchart TD
     SAT --> THEME
     COW & UFO & FIG --> MESH
 
-    VER --> GEO & CELLS
+    VER --> CELLS
     SCEN --> SCH & PAL
     SCH --> PT
     CELLS --> PAL

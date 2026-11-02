@@ -1,13 +1,15 @@
 """Determinación de la estabilidad de los ejes. Equilibrios, autovalores, estabilidad lineal y no lineal, y lado 
-de la separatriz"""
+de la separatriz, y régimen y estabilidad de la rotación"""
 
 from __future__ import annotations
 
+from functools import lru_cache
 from typing import TypedDict
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
+from space_physics.exact import EulerExact
 from space_physics.model import Array, angular_momentum_sq, is_degenerate, kinetic_energy, sorted_axes
 
 ComplexArray = NDArray[np.complex128]
@@ -111,3 +113,57 @@ def dominant_eigenvalue(I: ArrayLike, twoT: float, k:int) -> complex:
     """Se toma el autovalor que dicta la estabilidad del equilibrio k con la energía 2T. +i*beta en un centro
     (ambos son complejos conjugados, describen oscilación), y +mu real en una silla (amplifica la perturbación)."""
     return complex(analytic_eigenvalues(I, twoT)[k][1]) # Columna 1 es la raiz dominante.
+
+# ================ [4] RÉGIMEN Y ESTABILIDAD DE LA ROTACIÓN ================
+
+FLIP_DEG = 90.0 # Desviación máxima de omega (grados) a partir de la cual se considera que la rotación vuelca.
+
+
+class RotationStability(TypedDict):
+    """Estabilidad física de la rotación desde w0, medida sobre la órbita exacta."""
+    regime: str            # El de rotation_regime.
+    stability: str         # 'estable' | 'marginal' | 'inestable'.
+    deviation: float       # Ángulo máximo entre omega(t) y w0, en grados (0 si es marginal).
+    axis: int | None       # Eje que rodea la órbita (de surrounded_axis).
+
+
+def rotation_regime(I: ArrayLike, w0: ArrayLike) -> str:
+    """Régimen geométrico de la órbita: 'reposo', 'esfera', 'simetrico', 'separatriz', 'eje_mayor' o 'eje_menor'."""
+    if 2 * kinetic_energy(w0, I) <= 0:
+        return "reposo"
+    if np.ptp(np.asarray(I, dtype=float)) < 1e-6:
+        return "esfera"
+    if is_degenerate(I):
+        return "simetrico"
+    side = separatrix_side(I, w0)
+    if abs(side) < SEPARATRIX_TOL:
+        return "separatriz"
+    return "eje_mayor" if side > 0 else "eje_menor"
+
+
+@lru_cache(maxsize=64)
+def _max_deviation(I: tuple[float, ...], w0: tuple[float, ...]) -> float:
+    """Versión con caché de max_deviation, con argumentos hashables."""
+    orbit = EulerExact(I, w0).orbit(720)
+    if orbit is None:
+        return 0.0
+    dot = np.sum(orbit * np.asarray(w0), axis=1)                 # Producto escalar con w0, sin BLAS.
+    cos = dot / (np.linalg.norm(orbit, axis=1) * np.linalg.norm(w0))
+    return float(np.degrees(np.arccos(np.clip(cos.min(), -1.0, 1.0))))
+
+
+def max_deviation(I: ArrayLike, w0: ArrayLike) -> float:
+    """Ángulo máximo, en grados, entre omega(t) y omega0 a lo largo de la órbita exacta."""
+    # Distingue el eje intermedio: allí llega a ~180 grados por pequeña que sea la perturbación.
+    return _max_deviation(tuple(float(x) for x in np.ravel(I)), tuple(float(x) for x in np.ravel(w0)))
+
+
+def rotation_stability(I: ArrayLike, w0: ArrayLike) -> RotationStability:
+    """Estabilidad física de la rotación (ver RotationStability). Reposo, esfera y sólido simétrico son marginales:
+    no hay eje intermedio. En el resto, vuelca (inestable) si omega se aleja FLIP_DEG o más de su dirección inicial."""
+    regime = rotation_regime(I, w0)
+    if regime in ("reposo", "esfera", "simetrico"):
+        return {"regime": regime, "stability": "marginal", "deviation": 0.0, "axis": None}
+    deviation = max_deviation(I, w0)
+    return {"regime": regime, "stability": "inestable" if deviation >= FLIP_DEG else "estable",
+            "deviation": deviation, "axis": surrounded_axis(I, w0)}
