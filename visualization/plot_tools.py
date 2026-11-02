@@ -95,6 +95,8 @@ def level_curve(x: Array, y: Array, A: Array, level: float = 1.0) -> tuple[Array
 def stability_contour(amplification: ne.Amplification, re: Range, im: Range,
                       n: int = 301) -> tuple[Array, Array, NDArray[np.bool_], tuple[float, float, float, float]]:
     """Frontera |R(z)| = 1, máscara |R| <= 1 y rectángulo (x0, y0, ancho, alto) de la ventana"""
-    x, y, A = ne.stability_grid(amplification, re, im, n)
+    x, y = np.linspace(*re, n), np.linspace(*im, n)
+    with np.errstate(all="ignore"):
+        A = np.nan_to_num(np.abs(amplification(x[:, None] + 1j * y[None, :])), nan=np.inf)
     X, Y = level_curve(x, y, np.minimum(A, 10.0), 1.0)
     return X, Y, A <= 1.0, (float(x[0]), float(y[0]), float(x[-1] - x[0]), float(y[-1] - y[0]))

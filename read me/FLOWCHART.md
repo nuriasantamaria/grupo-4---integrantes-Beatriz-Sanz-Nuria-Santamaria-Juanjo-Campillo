@@ -45,7 +45,7 @@ flowchart TD
     end
 
     subgraph ENG["ampli/numerical_engine/"]
-        NEINT["numerical_engine.py<br/>integrate() → cauchy_problem()"]
+        NEINT["integration.py<br/>integrate() → cauchy_problem()"]
         STEP["numerical_engine.py<br/>step: Euler / implicit Euler /<br/>Crank–Nicolson / RK4 (Newton)"]
         STOPQ{"stop(u)?"}
     end
@@ -72,7 +72,7 @@ flowchart TD
 
 Divergence of ω is checked twice:
 
-1. **During integration.** `simulation/divergence.py` defines `stop_criterion`. `numerical_engine/numerical_engine.py` evaluates it after every step and fills the remaining rows with NaN once it triggers.
+1. **During integration.** `simulation/divergence.py` defines `stop_criterion`. `numerical_engine/integration.py` evaluates it after every step and fills the remaining rows with NaN once it triggers.
 2. **After each block.** `first_divergence` trims the block at the first row where ‖ω‖ exceeds 10³ times the maximum possible on the exact orbit (`omega_bound` in `space_physics/model.py`) and freezes the simulation.
 
 ## 2. Module map: packages (imports)
@@ -101,6 +101,7 @@ flowchart TD
         E_INIT["__init__.py"]
         E_RICH["richardson.py"]
         E_STAB["stability.py"]
+        E_INT["integration.py"]
         E_NE["numerical_engine.py"]
     end
 
@@ -138,9 +139,10 @@ flowchart TD
     S_ERR --> E_INIT
     S_ERR --> P_INIT
 
-    E_INIT --> E_NE & E_RICH & E_STAB
-    E_RICH --> E_NE
+    E_INIT --> E_NE & E_RICH & E_STAB & E_INT
+    E_RICH --> E_NE & E_INT
     E_STAB --> E_NE
+    E_INT --> E_NE
 
     P_INIT --> P_EQ & P_EX & P_MOD
     P_EQ --> P_MOD

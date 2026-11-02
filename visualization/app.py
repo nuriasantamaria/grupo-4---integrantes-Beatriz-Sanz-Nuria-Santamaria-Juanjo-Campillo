@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import sys
 
-import pyqtgraph as pg
 from PySide6 import QtGui, QtWidgets
+import pyqtgraph as pg
 
 from visualization import theme
 from visualization.palette import TEXT, VIEW_BG

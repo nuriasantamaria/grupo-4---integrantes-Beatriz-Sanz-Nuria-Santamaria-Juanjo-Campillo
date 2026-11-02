@@ -8,7 +8,8 @@ from typing import NamedTuple
 import numpy as np
 from numpy.linalg import norm
 
-from numerical_engine.numerical_engine import Array, Component, Field, Step, cauchy_problem, noise_floor
+from numerical_engine.integration import cauchy_problem
+from numerical_engine.numerical_engine import Array, Component, Field, Step, noise_floor
 
 
 def _check_richardson(T: float, N: int, p: float) -> None:
